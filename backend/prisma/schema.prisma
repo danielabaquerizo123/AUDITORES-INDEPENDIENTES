@@ -1,0 +1,428 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum AuditPeriodStatus {
+  OPEN
+  LOCKED
+  CLOSED
+}
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  APPROVED
+  CANCELLED
+}
+
+enum GeneratedDocumentStatus {
+  DRAFT
+  GENERATED
+  APPROVED
+  SIGNED
+  FAILED
+}
+
+enum FinancialImportStatus {
+  UPLOADED
+  PROCESSING
+  REVIEW_REQUIRED
+  PROCESSED
+  FAILED
+}
+
+enum FinancialStatementType {
+  FINANCIAL_POSITION
+  COMPREHENSIVE_INCOME
+  CHANGES_IN_EQUITY
+  CASH_FLOW
+}
+
+enum ClassificationSource {
+  AUTO
+  MANUAL
+}
+
+model Organization {
+  id                  String             @id @default(cuid())
+  name                String
+  legalName           String?
+  taxId               String?
+  email               String?
+  phone               String?
+  address             String?
+  auditorName         String?
+  auditorRegistration String?
+  active              Boolean            @default(true)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  users               User[]
+  roles               Role[]
+  clients             Client[]
+  contractTemplates   ContractTemplate[]
+  auditLogs           AuditLog[]
+}
+
+model User {
+  id                 String              @id @default(cuid())
+  organizationId     String
+  email              String
+  passwordHash       String
+  firstName          String
+  lastName           String
+  status             UserStatus          @default(ACTIVE)
+  lastLoginAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  deletedAt          DateTime?
+  organization       Organization        @relation(fields: [organizationId], references: [id])
+  roles              UserRole[]
+  createdContracts   Contract[]          @relation("ContractCreatedBy")
+  updatedContracts   Contract[]          @relation("ContractUpdatedBy")
+  generatedDocuments GeneratedDocument[]
+  uploadedFinancialImports FinancialImport[] @relation("FinancialImportUploadedBy")
+  auditLogs          AuditLog[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+}
+
+model Role {
+  id             String           @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  system         Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  users          UserRole[]
+  permissions    RolePermission[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  key         String           @unique
+  description String?
+  createdAt   DateTime         @default(now())
+  roles       RolePermission[]
+}
+
+model UserRole {
+  userId     String
+  roleId     String
+  assignedAt DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model Client {
+  id               String                 @id @default(cuid())
+  organizationId   String
+  legalName        String
+  tradeName        String?
+  taxId            String
+  economicActivity String?
+  email            String?
+  phone            String?
+  address          String?
+  city             String?
+  province         String?
+  country          String
+  status           ClientStatus           @default(ACTIVE)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  deletedAt        DateTime?
+  organization     Organization           @relation(fields: [organizationId], references: [id])
+  representatives  ClientRepresentative[]
+  auditPeriods     AuditPeriod[]
+  contracts        Contract[]
+
+  @@unique([organizationId, taxId])
+  @@index([organizationId])
+  @@index([legalName])
+  @@index([taxId])
+  @@index([status])
+}
+
+model ClientRepresentative {
+  id         String    @id @default(cuid())
+  clientId   String
+  treatment  String    @default("Sr.")
+  fullName   String
+  nationalId String?
+  position   String?
+  email      String?
+  phone      String?
+  isPrimary  Boolean   @default(false)
+  validFrom  DateTime?
+  validTo    DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  client     Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([clientId, isPrimary])
+}
+
+model AuditPeriod {
+  id                 String              @id @default(cuid())
+  clientId           String
+  label              String
+  fiscalYear         Int
+  startDate          DateTime            @db.Date
+  endDate            DateTime            @db.Date
+  status             AuditPeriodStatus   @default(OPEN)
+  lockedAt           DateTime?
+  closedAt           DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  client             Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  contracts          Contract[]
+  generatedDocuments GeneratedDocument[]
+  auditLogs          AuditLog[]
+  financialImports   FinancialImport[]
+
+  @@unique([clientId, fiscalYear])
+  @@index([clientId])
+}
+
+model ContractTemplate {
+  id             String                   @id @default(cuid())
+  organizationId String
+  name           String
+  version        Int
+  description    String?
+  active         Boolean                  @default(true)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  organization   Organization             @relation(fields: [organizationId], references: [id])
+  clauses        ContractTemplateClause[]
+  contracts      Contract[]
+
+  @@unique([organizationId, name, version])
+  @@index([organizationId])
+}
+
+model ContractTemplateClause {
+  id         String           @id @default(cuid())
+  templateId String
+  clauseKey  String
+  title      String
+  body       String
+  sortOrder  Int
+  required   Boolean          @default(true)
+  active     Boolean          @default(true)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  template   ContractTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  sourceFor  ContractClause[]
+
+  @@unique([templateId, clauseKey])
+  @@index([templateId, sortOrder])
+}
+
+model Contract {
+  id             String              @id @default(cuid())
+  clientId       String
+  auditPeriodId  String
+  templateId     String?
+  contractNumber String?
+  status         ContractStatus      @default(DRAFT)
+  signingDate    DateTime?           @db.Date
+  effectiveFrom  DateTime?           @db.Date
+  effectiveTo    DateTime?           @db.Date
+  reportDeliveryDate      DateTime? @db.Date
+  taxReportDeliveryDate   DateTime? @db.Date
+  informationDeliveryDate DateTime? @db.Date
+  draftReportDueDate      DateTime? @db.Date
+  feeNet         Decimal?            @db.Decimal(18, 2)
+  taxRate        Decimal?            @db.Decimal(5, 4)
+  currency       String              @default("USD") @db.VarChar(3)
+  variables      Json?
+  notes          String?
+  createdById    String
+  updatedById    String
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  client         Client              @relation(fields: [clientId], references: [id])
+  auditPeriod    AuditPeriod         @relation(fields: [auditPeriodId], references: [id])
+  template       ContractTemplate?   @relation(fields: [templateId], references: [id])
+  createdBy      User                @relation("ContractCreatedBy", fields: [createdById], references: [id])
+  updatedBy      User                @relation("ContractUpdatedBy", fields: [updatedById], references: [id])
+  clauses        ContractClause[]
+  documents      GeneratedDocument[]
+
+  @@unique([clientId, auditPeriodId])
+  @@index([auditPeriodId])
+  @@index([templateId])
+}
+
+model ContractClause {
+  id                     String                  @id @default(cuid())
+  contractId             String
+  clauseKey              String
+  title                  String
+  body                   String
+  sortOrder              Int
+  enabled                Boolean                 @default(true)
+  sourceTemplateClauseId String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  contract               Contract                @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  sourceTemplateClause   ContractTemplateClause? @relation(fields: [sourceTemplateClauseId], references: [id])
+
+  @@unique([contractId, clauseKey])
+  @@index([contractId, sortOrder])
+}
+
+model GeneratedDocument {
+  id                String                  @id @default(cuid())
+  auditPeriodId     String
+  contractId        String?
+  generatedById     String?
+  type              String
+  status            GeneratedDocumentStatus @default(DRAFT)
+  title             String
+  storageKey        String?
+  originalFileName  String?
+  mimeType          String?
+  sizeBytes         BigInt?
+  sha256            String?
+  templateKey       String?
+  templateVersion   String?
+  variablesSnapshot Json?
+  generatedAt       DateTime?
+  approvedAt        DateTime?
+  signedAt          DateTime?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  auditPeriod       AuditPeriod             @relation(fields: [auditPeriodId], references: [id])
+  contract          Contract?               @relation(fields: [contractId], references: [id])
+  generatedBy       User?                   @relation(fields: [generatedById], references: [id])
+
+  @@index([auditPeriodId])
+  @@index([contractId])
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  actorUserId    String?
+  action         String
+  entityType     String
+  entityId       String
+  auditPeriodId  String?
+  before         Json?
+  after          Json?
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+  requestId      String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  actorUser      User?        @relation(fields: [actorUserId], references: [id])
+  auditPeriod    AuditPeriod? @relation(fields: [auditPeriodId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([entityType, entityId])
+  @@index([auditPeriodId])
+}
+
+model FinancialImport {
+  id               String                @id @default(cuid())
+  auditPeriodId    String
+  uploadedById     String?
+  originalFileName String
+  storageKey       String?
+  mimeType         String?
+  sizeBytes        BigInt?
+  sha256           String?
+  status           FinancialImportStatus @default(UPLOADED)
+  version          Int                   @default(1)
+  attemptCount     Int                   @default(0)
+  currentYear      Int?
+  previousYear     Int?
+  processingError  String?
+  detectionSummary Json?
+  validationIssues Json?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  auditPeriod      AuditPeriod           @relation(fields: [auditPeriodId], references: [id], onDelete: Cascade)
+  uploadedBy       User?                 @relation("FinancialImportUploadedBy", fields: [uploadedById], references: [id])
+  statements       FinancialStatement[]
+
+  @@index([auditPeriodId])
+}
+
+model FinancialStatement {
+  id           String                 @id @default(cuid())
+  importId     String
+  type         FinancialStatementType
+  sheetName    String?
+  currentYear  Int?
+  previousYear Int?
+  detected     Boolean                @default(true)
+  confidence   Float?
+  lineCount    Int                    @default(0)
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  import       FinancialImport        @relation(fields: [importId], references: [id], onDelete: Cascade)
+  lines        FinancialStatementLine[]
+
+  @@unique([importId, type])
+  @@index([importId])
+}
+
+model FinancialStatementLine {
+  id                   String             @id @default(cuid())
+  statementId          String
+  sortOrder            Int
+  rawLabel             String
+  normalizedKey        String?
+  classified           Boolean            @default(false)
+  classificationSource ClassificationSource @default(AUTO)
+  sheetName            String?
+  sourceRow            Int?
+  sourceCurrentColumn  Int?
+  sourcePreviousColumn Int?
+  currentValue         Decimal?           @db.Decimal(18, 2)
+  previousValue        Decimal?           @db.Decimal(18, 2)
+  difference           Decimal?           @db.Decimal(18, 2)
+  percentageChange     Decimal?           @db.Decimal(10, 4)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  statement            FinancialStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  @@index([statementId, sortOrder])
+}
