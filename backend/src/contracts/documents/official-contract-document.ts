@@ -1,12 +1,11 @@
 import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { readFileSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
-import { dirname, join } from 'path';
+import { existsSync, readFileSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as JSZip from 'jszip';
-import { resolveGeneratedDir } from './contract-document.builder';
 
 export interface MasterSnapshot { templateVersion: string; templateHash: string; values: Record<string,string>; }
 interface Slot { paragraph:number; start:number; end:number; expected:string; key:string; upper:boolean }
@@ -15,6 +14,18 @@ const decode=(s:string)=>s.replace(/&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos);/gi,(
 const encode=(s:string)=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
 const texts=(xml:string)=>[...xml.matchAll(/<w:t(?:\s[^>]*)?>[\s\S]*?<\/w:t>/g)];
 const textOf=(xml:string)=>texts(xml).map(x=>decode(x[0].replace(/^<w:t(?:\s[^>]*)?>|<\/w:t>$/g,''))).join('');
+
+function resolveContractTemplatesDir(): string {
+ const candidates=[
+  join(process.cwd(),'storage','templates','contracts'),
+  join(process.cwd(),'backend','storage','templates','contracts'),
+ ];
+ const folder=candidates.find(candidate=>
+  existsSync(join(candidate,'template-map.json'))&&existsSync(join(candidate,'contrato-auditoria-externa-base.docx')),
+ );
+ if(!folder)throw new Error('Contract templates not found');
+ return folder;
+}
 
 /** Minimal character edits: unchanged characters stay in their original runs. */
 export function textEdits(old:string,next:string) {
@@ -91,7 +102,7 @@ export function signaturesTable(xml:string, signatureFont:string):string {
 @Injectable()
 export class OfficialContractDocument {
   private readonly logger = new Logger(OfficialContractDocument.name);
-  readonly folder=join(dirname(dirname(resolveGeneratedDir())),'backend','storage','templates','contracts');
+ readonly folder=resolveContractTemplatesDir();
  readonly map:TemplateMap=JSON.parse(readFileSync(join(this.folder,'template-map.json'),'utf8'));
  private pdfQueue:Promise<unknown>=Promise.resolve();
  snapshot(values:Record<string,string>):MasterSnapshot{return {templateVersion:this.map.version,templateHash:this.map.sha256,values};}
