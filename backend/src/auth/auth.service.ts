@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../database/prisma.service';
@@ -13,6 +13,20 @@ export class AuthService {
     const accessToken = await this.jwt.signAsync({ sub: user.id, organizationId: user.organizationId, permissions }, { secret: process.env.JWT_ACCESS_SECRET, expiresIn: '15m' });
     await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
     return { accessToken, user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, organization: { id: user.organization.id, name: user.organization.name }, permissions } };
+  }
+  async changePassword(userId: string, dto: { currentPassword: string; newPassword: string; confirmPassword: string }) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !(await argon2.verify(user.passwordHash, dto.currentPassword))) {
+      throw new UnauthorizedException('La contraseña actual es incorrecta.');
+    }
+    if (dto.newPassword !== dto.confirmPassword) throw new BadRequestException('La confirmación de contraseña no coincide.');
+    if (dto.newPassword === dto.currentPassword) throw new BadRequestException('La nueva contraseña debe ser distinta de la actual.');
+    if (dto.newPassword.length < 8 || !/[A-Z]/.test(dto.newPassword) || !/[a-z]/.test(dto.newPassword) || !/\d/.test(dto.newPassword) || !/[^A-Za-z0-9]/.test(dto.newPassword)) {
+      throw new BadRequestException('La nueva contraseña no cumple los requisitos de seguridad.');
+    }
+    const passwordHash = await argon2.hash(dto.newPassword, { type: argon2.argon2id });
+    await this.prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+    return { success: true };
   }
   async me(userId: string) { const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { organization: true, roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } } } }); if (!user) throw new UnauthorizedException(); return { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, organization: { id: user.organization.id, name: user.organization.name }, roles: user.roles.map((item) => item.role.name), permissions: user.roles.flatMap((item) => item.role.permissions.map((permission) => permission.permission.key)) }; }
 }

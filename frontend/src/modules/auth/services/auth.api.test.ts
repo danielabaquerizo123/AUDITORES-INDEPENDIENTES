@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
-vi.mock('../../../services/http-client', () => ({ httpClient: { get, post } }));
+const { get, post, patch } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn() }));
+vi.mock('../../../services/http-client', () => ({ httpClient: { get, post, patch } }));
 
-import { login, me } from './auth.api';
+import { changePassword, login, me } from './auth.api';
 
 describe('auth api', () => {
   it('uses accessToken from POST /auth/login and loads the current user from /auth/me', async () => {
@@ -14,5 +14,10 @@ describe('auth api', () => {
     await expect(me()).resolves.toMatchObject({ email: 'admin@sistema.local' });
     expect(post).toHaveBeenCalledWith('/auth/login', { email: 'admin@sistema.local', password: 'secret' });
     expect(get).toHaveBeenCalledWith('/auth/me');
+  });
+  it('sends password changes to the authenticated endpoint', async () => {
+    patch.mockResolvedValueOnce({ data: { success: true } });
+    await expect(changePassword('Actual123!', 'Nueva123!', 'Nueva123!')).resolves.toEqual({ success: true });
+    expect(patch).toHaveBeenCalledWith('/auth/change-password', { currentPassword: 'Actual123!', newPassword: 'Nueva123!', confirmPassword: 'Nueva123!' });
   });
 });
