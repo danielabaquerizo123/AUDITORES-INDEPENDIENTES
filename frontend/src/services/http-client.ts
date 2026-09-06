@@ -1,8 +1,14 @@
 import axios, { type AxiosError } from 'axios';
 import { session } from './session';
 
+export function resolveApiBaseUrl(value: string | undefined): string {
+  const baseUrl = value?.replace(/\/+$/, '');
+  if (!baseUrl) return '/api';
+  return /\/api$/i.test(baseUrl) ? baseUrl : `${baseUrl}/api`;
+}
+
 export const httpClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL,
+  baseURL: resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL),
   withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 });
