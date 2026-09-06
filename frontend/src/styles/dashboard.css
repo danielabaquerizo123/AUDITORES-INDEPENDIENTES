@@ -27,7 +27,7 @@
 
 /* Desktop density: real component dimensions, scoped to the Dashboard only. */
 @media (min-width: 1001px) {
-  .dashboard-shell:has(.dashboard-page) {
+  .dashboard-shell {
     --desktop-sidebar-width: 210px;
     --desktop-header-height: 56px;
 
@@ -96,7 +96,7 @@
 }
 
 @media (min-width: 1700px) {
-  .dashboard-shell:has(.dashboard-page) {
+  .dashboard-shell {
     & .welcome-hero { height: 360px; }
     & .welcome-copy { padding-top: 43px; }
     & .dashboard-content { margin-top: -23px; }
@@ -109,7 +109,7 @@
 }
 
 @media (min-width: 1001px) and (max-width: 1400px) {
-  .dashboard-shell:has(.dashboard-page) {
+  .dashboard-shell {
     --desktop-sidebar-width: 188px;
     & .dashboard-brand { height: 115px; font-size: 14px; }
     & .dashboard-nav-link { gap: 13px; padding-left: 19px; padding-right: 6px; font-size: 13px; }
