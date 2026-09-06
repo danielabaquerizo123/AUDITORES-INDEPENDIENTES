@@ -1,5 +1,5 @@
 import { randomBytes } from 'crypto';
-import { existsSync, mkdirSync, readFileSync } from 'fs';
+import { mkdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { Injectable } from '@nestjs/common';
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
@@ -17,6 +17,13 @@ export interface ContractDocumentInput {
 
 /** Resolves the repo-level storage/generated dir from either src/ or dist/ layouts. */
 export function resolveGeneratedDir(): string {
+  const storagePath = process.env.STORAGE_PATH;
+  if (storagePath) {
+    const generated = join(storagePath, 'generated');
+    mkdirSync(generated, { recursive: true });
+    return generated;
+  }
+
   let dir = __dirname;
   for (let depth = 0; depth < 6; depth += 1) {
     try {
@@ -25,7 +32,7 @@ export function resolveGeneratedDir(): string {
       };
       if (manifest.name === 'sistem-auditoria') {
         const generated = join(dir, 'storage', 'generated');
-        if (!existsSync(generated)) mkdirSync(generated, { recursive: true });
+        mkdirSync(generated, { recursive: true });
         return generated;
       }
     } catch {
