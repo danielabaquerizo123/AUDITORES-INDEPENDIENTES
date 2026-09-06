@@ -14,7 +14,7 @@
     "prisma:validate": "prisma validate",
     "prisma:seed": "tsx prisma/seed.ts",
     "create:admin": "tsx scripts/create-admin.ts",
-    "create:production-admin": "tsx scripts/create-production-admin.ts",
+    "seed:admin": "tsx scripts/seed-admin.ts",
     "reset:password": "tsx scripts/reset-user-password.ts"
   },
   "prisma": {
