@@ -75,6 +75,7 @@ model Organization {
   users               User[]
   roles               Role[]
   clients             Client[]
+  auditors            Auditor[]
   contractTemplates   ContractTemplate[]
   auditLogs           AuditLog[]
 }
@@ -175,6 +176,34 @@ model Client {
   @@index([status])
 }
 
+model Auditor {
+  id                        String       @id @default(cuid())
+  organizationId            String
+  fullName                  String
+  cedula                    String
+  ruc                       String
+  professionalTitles        String
+  position                  String
+  externalAuditorRegistration String
+  judicialExpertNumber      String
+  accountantLicenseNumber   String
+  address                   String
+  phone                     String
+  email                     String
+  isActive                  Boolean      @default(true)
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime     @updatedAt
+  deletedAt                 DateTime?
+  organization              Organization @relation(fields: [organizationId], references: [id])
+  contracts                 Contract[]
+
+  @@unique([organizationId, cedula])
+  @@unique([organizationId, ruc])
+  @@unique([organizationId, externalAuditorRegistration])
+  @@index([organizationId])
+  @@index([fullName])
+}
+
 model ClientRepresentative {
   id         String    @id @default(cuid())
   clientId   String
@@ -273,6 +302,8 @@ model Contract {
   notes          String?
   createdById    String
   updatedById    String
+  auditorId      String?
+  auditorSnapshot Json?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
   client         Client              @relation(fields: [clientId], references: [id])
@@ -280,12 +311,14 @@ model Contract {
   template       ContractTemplate?   @relation(fields: [templateId], references: [id])
   createdBy      User                @relation("ContractCreatedBy", fields: [createdById], references: [id])
   updatedBy      User                @relation("ContractUpdatedBy", fields: [updatedById], references: [id])
+  auditor        Auditor?            @relation(fields: [auditorId], references: [id])
   clauses        ContractClause[]
   documents      GeneratedDocument[]
 
   @@unique([clientId, auditPeriodId])
   @@index([auditPeriodId])
   @@index([templateId])
+  @@index([auditorId])
 }
 
 model ContractClause {
@@ -296,6 +329,8 @@ model ContractClause {
   body                   String
   sortOrder              Int
   enabled                Boolean                 @default(true)
+  isCustom               Boolean                 @default(false)
+  parentClauseKey        String?
   sourceTemplateClauseId String?
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt

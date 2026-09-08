@@ -6,6 +6,7 @@ import { envValidationSchema } from './config/env.validation';
 import { AuthModule } from './auth/auth.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { AuditPeriodsModule } from './audit-periods/audit-periods.module';
+import { AuditorsModule } from './auditors/auditors.module';
 import { ClientsModule } from './clients/clients.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -27,7 +28,7 @@ import { WorkingPapersModule } from './working-papers/working-papers.module';
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     // BullMQ is installed and configured when concrete queues are approved; no worker
     // connection is opened during the architecture phase.
-    DatabaseModule, AuthModule, UsersModule, DashboardModule, ClientsModule, AuditPeriodsModule,
+    DatabaseModule, AuthModule, UsersModule, DashboardModule, ClientsModule, AuditorsModule, AuditPeriodsModule,
     ContractsModule, FinancialStatementsModule, MaterialityModule, WorkingPapersModule, ReportsModule,
     DocumentsModule, StorageModule, JobsModule, AuditLogModule, SecurityModule, HealthModule,
   ],

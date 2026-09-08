@@ -3,7 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ContractsService } from './contracts.service';
 import { ContractBatchService } from './contract-batch.service';
-import { CreateContractDto, CreateTemplateDto, GenerateBatchDto, GenerateDocumentDto, UpdateContractDto, PrepareOfficialContractDto } from './dto/contracts.dto';
+import { CreateContractDto, CreateTemplateDto, GenerateBatchDto, GenerateDocumentDto, UpdateContractDto, UpdateContractClauseDto, CreateContractClauseDto, CreateContractParagraphDto, PrepareOfficialContractDto, AssignContractAuditorDto } from './dto/contracts.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/permissions.decorator';
@@ -62,6 +62,38 @@ export class ContractsController {
     @Body() dto: UpdateContractDto,
   ) {
     return this.service.updateContract(user.organizationId, user.id, id, dto);
+  }
+
+  @Permissions('contracts.update') @Patch('contracts/:id/auditor')
+  assignAuditor(@CurrentUser() user: AuthenticatedUser, @Param('id') id:string, @Body() dto:AssignContractAuditorDto) { return this.service.assignAuditor(user.organizationId,user.id,id,dto.auditorId); }
+
+  @Permissions('contracts.update')
+  @Patch('contracts/:contractId/clauses/:clauseId')
+  updateClause(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('contractId') contractId: string,
+    @Param('clauseId') clauseId: string,
+    @Body() dto: UpdateContractClauseDto,
+  ) {
+    return this.service.updateClause(user.organizationId, user.id, contractId, clauseId, dto);
+  }
+
+  @Permissions('contracts.update')
+  @Post('contracts/:contractId/clauses')
+  createClause(@CurrentUser() user: AuthenticatedUser, @Param('contractId') contractId: string, @Body() dto: CreateContractClauseDto) {
+    return this.service.createCustomClause(user.organizationId, user.id, contractId, dto);
+  }
+
+  @Permissions('contracts.update')
+  @Post('contracts/:contractId/clauses/:clauseId/paragraphs')
+  createParagraph(@CurrentUser() user: AuthenticatedUser, @Param('contractId') contractId: string, @Param('clauseId') clauseId: string, @Body() dto: CreateContractParagraphDto) {
+    return this.service.createCustomParagraph(user.organizationId, user.id, contractId, clauseId, dto);
+  }
+
+  @Permissions('contracts.update')
+  @Patch('contracts/:contractId/clauses/:clauseId/delete')
+  deleteClause(@CurrentUser() user: AuthenticatedUser, @Param('contractId') contractId: string, @Param('clauseId') clauseId: string) {
+    return this.service.deleteCustomClause(user.organizationId, user.id, contractId, clauseId);
   }
 
   @Permissions('contracts.create')

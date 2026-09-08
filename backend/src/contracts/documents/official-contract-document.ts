@@ -7,7 +7,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as JSZip from 'jszip';
 
-export interface MasterSnapshot { templateVersion: string; templateHash: string; values: Record<string,string>; }
+export interface MasterSnapshot { templateVersion: string; templateHash: string; values: Record<string,string>; AUDITOR?: AuditorFooterSnapshot; }
 interface Slot { paragraph:number; start:number; end:number; expected:string; key:string; upper:boolean }
 interface TemplateMap { version:string; sha256:string; paragraphs:string[]; slots:Slot[] }
 const decode=(s:string)=>s.replace(/&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos);/gi,(_,v:string)=>v[0]==='#'?String.fromCodePoint(v[1]==='x'?parseInt(v.slice(2),16):parseInt(v.slice(1),10)):({amp:'&',lt:'<',gt:'>',quot:'"',apos:"'"}[v] ?? ''));
@@ -61,6 +61,45 @@ export function patchParagraph(xml:string,next:string,ranges?:{start:number;end:
   xml=xml.slice(0,node.index!)+opening+encode(values[k])+'</w:t>'+xml.slice(node.index!+node[0].length);
  }return xml;
 }
+type AuditorFooterSnapshot={professionalTitles:string;fullName:string;position:string;ruc:string;externalAuditorRegistration:string;judicialExpertNumber:string;accountantLicenseNumber:string;address:string;phone:string;email:string};
+const footerTextKey=(value:string)=>value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,'').toLocaleLowerCase('es');
+
+/**
+ * A professional footer is duplicated by Word in DrawingML and VML text boxes.
+ * Each text box has ordinary, non-nested paragraphs, so patching at this level
+ * keeps its shape, position and run formatting intact.  Parsing all `w:p`
+ * nodes from the full footer would stop at the first nested paragraph and leave
+ * the VML fallback with stale text.
+ */
+function patchAuditorTextBox(xml:string,auditor:AuditorFooterSnapshot):string {
+ const paragraphs=[...xml.matchAll(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g)];
+ const patches:{index:number;length:number;value:string}[]=[];
+ let clearAddressContinuation=false;
+ for(const paragraph of paragraphs){
+  const compact=footerTextKey(textOf(paragraph[0]));let next:string|undefined;
+  if(clearAddressContinuation){
+   // The master address is wrapped over two paragraphs.  The first receives
+   // the selected auditor address; clear the old continuation without moving
+   // or removing its text box structure.
+   next='';clearAddressContinuation=false;
+  } else if(compact.includes('email:'))next=`Email: ${auditor.email}`;
+  else if(compact.includes('telefono:'))next=`Teléfono: ${auditor.phone}`;
+  else if(compact.includes('direccion:')){next=`Dirección: ${auditor.address}`;clearAddressContinuation=true;}
+  else if(compact.includes('rucno.'))next=`RUC No. ${auditor.ruc}`;
+  else if(compact.includes('registronacional')&&compact.includes('auditorexterno'))next=`Registro Nacional Auditor Externo No. ${auditor.externalAuditorRegistration}`;
+  else if(compact.includes('peritofuncionjudicial'))next=`Perito Función Judicial No. ${auditor.judicialExpertNumber}`;
+  else if(compact.includes('contadormatricula'))next=`Contador Matricula No. ${auditor.accountantLicenseNumber}`;
+  else if(compact.includes('gerenteconsultor')&&compact.includes('auditor'))next=auditor.position;
+  else if(compact.includes('wilmerespinoza'))next=`${auditor.professionalTitles} ${auditor.fullName}`;
+  if(next!==undefined)patches.push({index:paragraph.index!,length:paragraph[0].length,value:patchParagraph(paragraph[0],next)});
+ }
+ for(const patch of patches.reverse())xml=xml.slice(0,patch.index)+patch.value+xml.slice(patch.index+patch.length);
+ return xml;
+}
+
+function patchAuditorFooterPart(xml:string,auditor:AuditorFooterSnapshot):string {
+ return xml.replace(/<w:txbxContent>[\s\S]*?<\/w:txbxContent>/g,textBox=>patchAuditorTextBox(textBox,auditor));
+}
 /**
  * Bloque de firmas en tabla de 2 columnas sin bordes.
  * Reemplaza los párrafos p62-p64 (nombres/posición/empresa separados con
@@ -71,11 +110,15 @@ export function patchParagraph(xml:string,next:string,ranges?:{start:number;end:
  * página (parte word/footer*.xml) quedan intactos. Si la forma esperada no
  * se reconoce, devuelve el XML sin cambios para no romper la generación.
  */
-export function signaturesTable(xml:string, signatureFont:string):string {
+export function signaturesTable(xml:string, signatureFont:string, signatureTexts:[string,string,string]):string {
  const paragraphs=[...xml.matchAll(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g)];
- // Índices de la plantilla maestra: p62 nombres, p63 cargos, p64 empresa.
- if(paragraphs.length<65)return xml;
- const [names,roles,company]=[paragraphs[62][0],paragraphs[63][0],paragraphs[64][0]];
+ // Se buscan los tres párrafos maestros por contenido, no por índice: los
+ // párrafos agregados pueden aparecer antes de las firmas.
+ const [nameText,roleText,companyText]=signatureTexts;
+ const names=paragraphs.find(item=>textOf(item[0])===nameText)?.[0];
+ const roles=paragraphs.find(item=>textOf(item[0])===roleText)?.[0];
+ const company=paragraphs.find(item=>textOf(item[0])===companyText)?.[0];
+ if(!names||!roles||!company)return xml;
  const parts=(text:string)=>text.split(/\s{2,}|\t+/).map(t=>t.trim()).filter(Boolean);
  const nameParts=parts(textOf(names)),roleParts=parts(textOf(roles)),companyParts=parts(textOf(company));
  if(nameParts.length!==2||roleParts.length!==2||companyParts.length<1)return xml;
@@ -97,13 +140,17 @@ export function signaturesTable(xml:string, signatureFont:string):string {
  const row=(left:string,leftStyle:string,right:string,rightStyle:string)=>`<w:tr><w:tc><w:tcPr><w:tcW w:w="4500" w:type="dxa"/></w:tcPr>${cell(left,leftStyle)}</w:tc><w:tc><w:tcPr><w:tcW w:w="4500" w:type="dxa"/></w:tcPr>${cell(right,rightStyle)}</w:tc></w:tr>`;
  const border=`<w:top w:val="nil" w:sz="0" w:space="0" w:color="auto"/><w:left w:val="nil" w:sz="0" w:space="0" w:color="auto"/><w:bottom w:val="nil" w:sz="0" w:space="0" w:color="auto"/><w:right w:val="nil" w:sz="0" w:space="0" w:color="auto"/><w:insideH w:val="nil" w:sz="0" w:space="0" w:color="auto"/><w:insideV w:val="nil" w:sz="0" w:space="0" w:color="auto"/>`;
  const table=`<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:jc w:val="center"/><w:tblLayout w:type="fixed"/><w:tblBorders>${border}</w:tblBorders></w:tblPr><w:tblGrid><w:gridCol w:w="4500"/><w:gridCol w:w="4500"/></w:tblGrid>${row(nameParts[0],nameStyle,nameParts[1],nameStyle)}${row(roleParts[0],roleStyle,roleParts[1],roleStyle)}${row(companyParts.join(' '),companyStyle,'',companyStyle)}</w:tbl>`;
- return xml.slice(0,paragraphs[62].index!)+table+xml.slice(paragraphs[64].index!+paragraphs[64][0].length);
+ const start=xml.indexOf(names),end=xml.indexOf(company)+company.length;
+ if(start<0||end<start)return xml;
+ return xml.slice(0,start)+table+xml.slice(end);
 }
 @Injectable()
 export class OfficialContractDocument {
-  private readonly logger = new Logger(OfficialContractDocument.name);
+ private readonly logger = new Logger(OfficialContractDocument.name);
  readonly folder=resolveContractTemplatesDir();
  readonly map:TemplateMap=JSON.parse(readFileSync(join(this.folder,'template-map.json'),'utf8'));
+ private readonly masterDocx=readFileSync(join(this.folder,'contrato-auditoria-externa-base.docx'));
+ private readonly masterHash=createHash('sha256').update(this.masterDocx).digest('hex');
  private pdfQueue:Promise<unknown>=Promise.resolve();
  snapshot(values:Record<string,string>):MasterSnapshot{return {templateVersion:this.map.version,templateHash:this.map.sha256,values};}
  isOfficial(value:unknown):value is MasterSnapshot{return !!value&&typeof value==='object'&&(value as MasterSnapshot).templateVersion===this.map.version;}
@@ -116,22 +163,31 @@ export class OfficialContractDocument {
    return {clauseKey:`p${index}`,title:index<2?'Título del contrato':`Sección ${index}`,body,sortOrder:index};
   }).filter(s=>s.body.trim());
  }
- async docx(snapshot:MasterSnapshot,sections:{clauseKey:string;body:string}[]){
-  const source=readFileSync(join(this.folder,'contrato-auditoria-externa-base.docx'));
-  if(createHash('sha256').update(source).digest('hex')!==snapshot.templateHash||snapshot.templateHash!==this.map.sha256)throw new BadRequestException('La plantilla maestra cambió; no se generó el documento.');
+ async docx(snapshot:MasterSnapshot,sections:{clauseKey:string;body:string;title?:string;sortOrder?:number;isCustom?:boolean}[]){
+  const source=this.masterDocx;
+  if(this.masterHash!==snapshot.templateHash||snapshot.templateHash!==this.map.sha256)throw new BadRequestException('La plantilla maestra cambió; no se generó el documento.');
   const zip=await JSZip.loadAsync(source);let xml=await zip.file('word/document.xml')!.async('string');
   const styles=await zip.file('word/styles.xml')!.async('string');
   const signatureFont=styles.match(/<w:docDefaults>[\s\S]*?<w:rPrDefault>[\s\S]*?<w:rPr>[\s\S]*?(<w:rFonts\b[^>]*\/>)/)?.[1];
   if(!signatureFont)throw new Error('No se pudo obtener la fuente de la plantilla para las firmas.');
   const paragraphs=[...xml.matchAll(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g)];
   if(paragraphs.length!==this.map.paragraphs.length)throw new Error('Estructura DOCX inesperada');
-  const byKey=new Map(sections.map(s=>[s.clauseKey,s.body]));
+  const base=sections.filter(section=>!section.isCustom&&/^p\d+$/.test(section.clauseKey));
+  const byKey=new Map(base.map(s=>[s.clauseKey,s.body]));
+  const additions=new Map<string,typeof sections>();let previous='';
+  for(const section of sections.slice().sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0))){if(!section.isCustom&&/^p\d+$/.test(section.clauseKey))previous=section.clauseKey;else if(section.isCustom&&previous){const items=additions.get(previous)??[];items.push(section);additions.set(previous,items);}}
   for(let i=paragraphs.length-1;i>=0;i--){const p=paragraphs[i];if(textOf(p[0])!==this.map.paragraphs[i])throw new Error('Texto DOCX inesperado');const body=byKey.get(`p${i}`);if(body===undefined)continue;const ranges=this.map.slots.filter(s=>s.paragraph===i).map(slot=>{const raw=snapshot.values[slot.key]??'';return {start:slot.start,end:slot.end,value:slot.upper?raw.toLocaleUpperCase('es'):raw};}).filter(slot=>this.map.paragraphs[i].slice(slot.start,slot.end)!==slot.value);
     // Semantic substitutions inherit the first run of their verified slot. Manual
     // changes then preserve unchanged text and its existing run formatting.
     const prepared=ranges.length?patchParagraph(p[0],'',ranges):p[0];
-  const edited=patchParagraph(prepared,body);xml=xml.slice(0,p.index!)+edited+xml.slice(p.index!+p[0].length);}
-  xml=signaturesTable(xml,signatureFont);
+  const edited=patchParagraph(prepared,body);const custom=(additions.get(`p${i}`)??[]).map(item=>{
+    const bodyParagraph=patchParagraph(p[0],item.body);
+    return item.title?.trim()?`${patchParagraph(p[0],item.title)}${bodyParagraph}`:bodyParagraph;
+  }).join('');xml=xml.slice(0,p.index!)+edited+custom+xml.slice(p.index!+p[0].length);}
+  xml=signaturesTable(xml,signatureFont,[this.map.paragraphs[62],this.map.paragraphs[63],this.map.paragraphs[64]]);
+  const legacyAuditor=(snapshot.values as unknown as {AUDITOR?:AuditorFooterSnapshot}).AUDITOR;
+  const auditor=snapshot.AUDITOR??legacyAuditor;
+  if(auditor)for(const name of Object.keys(zip.files).filter(name=>/^word\/(footer|header)\d+\.xml$/.test(name))){const part=zip.file(name);if(part)zip.file(name,patchAuditorFooterPart(await part.async('string'),auditor),{date:zip.files[name].date});}
   zip.file('word/document.xml',xml,{date:zip.files['word/document.xml'].date});return zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'});
   }
  async pdf(docx:Buffer):Promise<Buffer>{

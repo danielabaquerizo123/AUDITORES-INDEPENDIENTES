@@ -29,6 +29,8 @@ export interface ContractClause {
   body: string;
   sortOrder: number;
   enabled: boolean;
+  isCustom?: boolean;
+  parentClauseKey?: string | null;
 }
 
 export interface ContractSummary {
@@ -50,6 +52,9 @@ export interface ContractSummary {
   feeNet: string | null;
   currency: string;
   notes: string | null;
+  auditorId?: string | null;
+  auditorSnapshot?: {fullName:string;professionalTitles:string;externalAuditorRegistration:string} | null;
+  auditor?: {id:string;fullName:string;professionalTitles:string;externalAuditorRegistration:string} | null;
   template?: { id: string; name: string; version: number } | null;
   client?: { id: string; legalName: string; taxId: string };
   auditPeriod?: { id: string; label: string; fiscalYear: number };
@@ -183,6 +188,15 @@ export const contractsApi = {
     (await httpClient.post<ContractSummary>(`/audit-periods/${periodId}/contracts`, payload)).data,
   updateContract: async (id: string, payload: UpdateContractPayload): Promise<ContractSummary> =>
     (await httpClient.patch<ContractSummary>(`/contracts/${id}`, payload)).data,
+  assignAuditor: async(id:string,auditorId:string):Promise<ContractSummary>=>(await httpClient.patch<ContractSummary>(`/contracts/${id}/auditor`,{auditorId})).data,
+  updateClause: async (contractId: string, clauseId: string, body: string): Promise<ContractClause> =>
+    (await httpClient.patch<ContractClause>(`/contracts/${contractId}/clauses/${clauseId}`, { body })).data,
+  createClause: async (contractId:string,payload:{title:string;body:string;insertBeforeClauseId?:string}):Promise<ContractClause> =>
+    (await httpClient.post<ContractClause>(`/contracts/${contractId}/clauses`,payload)).data,
+  createParagraph: async (contractId:string,clauseId:string,body:string):Promise<ContractClause> =>
+    (await httpClient.post<ContractClause>(`/contracts/${contractId}/clauses/${clauseId}/paragraphs`,{body})).data,
+  deleteClause: async (contractId:string,clauseId:string):Promise<{id:string;deleted:boolean}> =>
+    (await httpClient.patch<{id:string;deleted:boolean}>(`/contracts/${contractId}/clauses/${clauseId}/delete`)).data,
   getPreview: async (id: string): Promise<ContractPreview> =>
     (await httpClient.get<ContractPreview>(`/contracts/${id}/preview`)).data,
   getValidation: async (id: string): Promise<ContractValidation> =>

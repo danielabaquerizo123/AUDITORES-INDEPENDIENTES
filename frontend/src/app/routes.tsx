@@ -15,6 +15,9 @@ import { DashboardPage } from '../modules/dashboard/dashboard-page';
 import { FinancialImportPage } from '../modules/financial-statements/financial-import-page';
 import { ReportsPage } from '../modules/reports/reports-page';
 import { SettingsPage } from '../modules/settings/settings-page';
+import { AuditorsPage } from '../modules/auditors/auditors-page';
+import { AuditorEditor } from '../modules/auditors/auditor-editor';
+import { AuditorDetailPage } from '../modules/auditors/auditor-detail-page';
 import '../styles/page-density.css';
 
 function PlaceholderPage({ title }: { title: string }) {
@@ -37,6 +40,10 @@ export function AppRoutes() {
         <Route path="/clientes/nuevo" element={<ClientNewPage />} />
         <Route path="/clientes/:id" element={<ClientDetailPage />} />
         <Route path="/clientes/:id/editar" element={<ClientEditPage />} />
+        <Route path="/auditores" element={<AuditorsPage />} />
+        <Route path="/auditores/nuevo" element={<AuditorEditor />} />
+        <Route path="/auditores/:id" element={<AuditorDetailPage />} />
+        <Route path="/auditores/:id/editar" element={<AuditorEditor />} />
         <Route path="/clients" element={<LegacyClientRedirect />} />
         <Route path="/clients/new" element={<LegacyClientRedirect mode="new" />} />
         <Route path="/clients/:id" element={<LegacyClientRedirect />} />

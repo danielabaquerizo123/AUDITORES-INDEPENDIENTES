@@ -1,0 +1,5 @@
+import { z } from 'zod';
+const required=(label:string,max=255)=>z.string().trim().min(1,'Este campo es obligatorio.').max(max,`Máximo ${max} caracteres`);
+const titles=/^(?:(?:Lcdo\.|CPA\.|Ing\.|Econ\.|Abg\.|Mgtr\.|Mgs\.|Dr\.|PhD\.)\s*)+$/;
+export const auditorSchema=z.object({fullName:required('Nombres y apellidos'),cedula:z.string().regex(/^\d{10}$/,'La cédula debe contener 10 dígitos numéricos.'),ruc:z.string().regex(/^\d{13}$/,'El RUC debe contener 13 dígitos numéricos.'),professionalTitles:z.string().trim().regex(titles,'Utilice únicamente la abreviatura del título profesional. Ejemplo: Ing. en lugar de Ingeniero.'),position:required('Cargo',120),externalAuditorRegistration:required('Registro',120),judicialExpertNumber:required('Perito',120),accountantLicenseNumber:required('Matrícula',120),address:required('Dirección',500),phone:z.string().trim().regex(/^[0-9+()\-\s]{7,30}$/,'Ingrese un teléfono válido.'),email:z.string().trim().email('Ingrese un correo válido.')});
+export type AuditorValues=z.infer<typeof auditorSchema>;

@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 
 export const ADMIN_PERMISSION_KEYS = [
  'clients.read', 'clients.create', 'clients.update', 'clients.delete', 'periods.read', 'periods.create', 'periods.update',
+ 'auditors.read', 'auditors.create', 'auditors.update', 'auditors.delete',
  'contracts.read', 'contracts.create', 'contracts.update', 'contracts.approve', 'contracts.generate',
  'documents.read', 'documents.generate', 'users.read', 'users.manage', 'audit.read',
  'financial.read', 'financial.import', 'financial.update',

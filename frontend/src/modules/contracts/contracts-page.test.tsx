@@ -3,18 +3,22 @@ import { fireEvent,render,screen,within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach,expect,it,vi } from 'vitest';
 import { ContractsPage } from './contracts-page';
-const {listContracts,prepareOfficial,generateDocument,downloadDocument}=vi.hoisted(()=>({listContracts:vi.fn(),prepareOfficial:vi.fn(),generateDocument:vi.fn(),downloadDocument:vi.fn()}));
-vi.mock('./services/contracts.api',()=>({contractsApi:{listContracts,prepareOfficial,generateDocument,downloadDocument}}));
+const {listContracts,prepareOfficial,generateDocument,downloadDocument,assignAuditor}=vi.hoisted(()=>({listContracts:vi.fn(),prepareOfficial:vi.fn(),generateDocument:vi.fn(),downloadDocument:vi.fn(),assignAuditor:vi.fn()}));
+vi.mock('./services/contracts.api',()=>({contractsApi:{listContracts,prepareOfficial,generateDocument,downloadDocument,assignAuditor}}));
 const {getClientPage}=vi.hoisted(()=>({getClientPage:vi.fn()}));
 vi.mock('../clients/services/clients.api',()=>({clientsApi:{getClientPage}}));
+const {listAuditors}=vi.hoisted(()=>({listAuditors:vi.fn()}));
+vi.mock('../auditors/services/auditors.api',()=>({auditorsApi:{list:listAuditors}}));
 const tia2026={id:'a',clientId:'c1',client:{legalName:'TIA S.A.',taxId:'00001'},auditPeriod:{fiscalYear:2026}};
+const daniela={id:'d1',fullName:'Daniela Nicolle Baquerizo',professionalTitles:'Ing. CPA.',externalAuditorRegistration:'SCVS-RNAE-2458'};
 const tia2025={id:'b',clientId:'c1',client:{legalName:'TIA S.A.',taxId:'00001'},auditPeriod:{fiscalYear:2025}};
 const otra={id:'c',clientId:'c2',client:{legalName:'OTRA S.A.',taxId:'00002'},auditPeriod:{fiscalYear:2026}};
 const tiaClient={id:'c1',legalName:'TIA S.A.',taxId:'00001'};
 const otraClient={id:'c2',legalName:'OTRA S.A.',taxId:'00002'};
 function show(){render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><MemoryRouter><ContractsPage/></MemoryRouter></QueryClientProvider>)}
 function search(q:string,year?:string){fireEvent.change(screen.getByPlaceholderText('Escriba razón social o RUC...'),{target:{value:q}});if(year)fireEvent.change(screen.getByLabelText('Año auditado'),{target:{value:year}});fireEvent.click(screen.getByRole('button',{name:'Buscar'}))}
-beforeEach(()=>{vi.clearAllMocks();listContracts.mockResolvedValue([tia2026,tia2025,otra]);getClientPage.mockResolvedValue({items:[],total:0,page:1,pageSize:5})});
+beforeEach(()=>{vi.clearAllMocks();listContracts.mockResolvedValue([tia2026,tia2025,otra]);getClientPage.mockResolvedValue({items:[],total:0,page:1,pageSize:5});listAuditors.mockResolvedValue({items:[daniela],total:1,page:1,pageSize:5})});
+it('conserva la columna Auditor y muestra el selector o el auditor persistido',async()=>{listContracts.mockResolvedValue([{...tia2026,auditorId:null},{...tia2025,auditorId:'d1',auditor:daniela}]);show();expect(await screen.findByRole('columnheader',{name:'Auditor'})).toBeInTheDocument();await screen.findAllByText('TIA S.A.');expect(screen.getByRole('button',{name:'Seleccionar auditor ▼'})).toBeInTheDocument();expect(screen.getByRole('button',{name:'Ing. CPA. Daniela Nicolle Baquerizo ▼'})).toBeInTheDocument()});
 it('combina empresa y año y conserva solamente las columnas solicitadas',async()=>{getClientPage.mockResolvedValue({items:[tiaClient],total:1,page:1,pageSize:5});show();await screen.findByText('OTRA S.A.');search('TIA','2026');await vi.waitFor(()=>{expect(screen.getAllByText('TIA S.A.')).toHaveLength(1);expect(screen.queryByText('OTRA S.A.')).not.toBeInTheDocument()});expect(screen.queryByRole('columnheader',{name:'Estado'})).not.toBeInTheDocument();expect(screen.queryByRole('link',{name:'Preparar contrato'})).not.toBeInTheDocument()});
 it('busca RUC y descarga la versión generada',async()=>{generateDocument.mockResolvedValue({id:'doc1'});downloadDocument.mockResolvedValue(undefined);getClientPage.mockResolvedValue({items:[otraClient],total:1,page:1,pageSize:5});show();await screen.findByText('OTRA S.A.');search('00002','2026');await vi.waitFor(()=>{expect(screen.getByText('OTRA S.A.')).toBeInTheDocument();expect(screen.queryByText('TIA S.A.')).not.toBeInTheDocument()});const row=screen.getByText('OTRA S.A.').closest('tr')!;fireEvent.click(within(row).getByRole('button',{name:'Generar o descargar contrato'}));fireEvent.click(screen.getByRole('menuitem',{name:'Generar Word'}));await vi.waitFor(()=>expect(downloadDocument).toHaveBeenCalledWith('c',{id:'doc1'}));expect(generateDocument).toHaveBeenCalledWith('c','docx')});
 it('muestra estado vacío sin datos inventados',async()=>{listContracts.mockResolvedValue([]);show();expect(await screen.findByText(/Aún no hay contratos/)).toBeInTheDocument()});

@@ -90,10 +90,26 @@ export class ContractSectionEditDto {
  @IsString() @MaxLength(8000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
 }
 
+/** Contenido de una única cláusula persistida del contrato. */
+export class UpdateContractClauseDto {
+ @IsString() @MaxLength(8000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
+}
+
+export class CreateContractClauseDto {
+ @IsString() @IsNotEmpty() @MaxLength(240) title!: string;
+ @IsString() @IsNotEmpty() @MaxLength(8000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
+ @IsOptional() @IsString() insertBeforeClauseId?: string;
+}
+
+export class CreateContractParagraphDto {
+ @IsString() @IsNotEmpty() @MaxLength(8000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
+}
+
 export class PrepareOfficialContractDto {
  @IsString() @IsNotEmpty() clientId!: string;
  @Type(() => Number) @IsInt() @Min(1900) @Max(2200) auditedYear!: number;
 }
+export class AssignContractAuditorDto { @IsString() @IsNotEmpty() auditorId!: string; }
 
 export class UpdateContractDto {
  @IsOptional() @IsArray() @ValidateNested({each:true}) @Type(() => ContractSectionEditDto) sections?: ContractSectionEditDto[];

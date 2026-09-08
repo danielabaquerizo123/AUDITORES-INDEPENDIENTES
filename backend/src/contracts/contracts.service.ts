@@ -1,12 +1,12 @@
 import { OfficialContractDocument } from './documents/official-contract-document';
 
-import { PrepareOfficialContractDto } from './dto/contracts.dto';
+import { PrepareOfficialContractDto, UpdateContractClauseDto, CreateContractClauseDto, CreateContractParagraphDto } from './dto/contracts.dto';
 
-import { BadRequestException, ConflictException, Injectable, NotFoundException, StreamableFile } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, StreamableFile } from '@nestjs/common';
 
 import { Prisma } from '@prisma/client';
 
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 
@@ -57,6 +57,10 @@ const DOCUMENT_TYPES: Record<GeneratedFormat, string> = {
   pdf: 'CONTRACT_PDF',
 
 };
+
+// Las cláusulas jurídicas, datos de cliente y firmas de la plantilla oficial
+// son de solo lectura. Estas son las secciones variables visibles en el editor.
+const OFFICIAL_CLAUSE_STARTS = [2, 5, 7, 9, 20, 28, 44, 47, 52, 57, 58, 59, 60];
 
 
 
@@ -126,7 +130,7 @@ function toSafeDocument(row: {
 
 type OfficialContractItem = Prisma.ContractGetPayload<{
 
-  include: { clauses: true; client: true; auditPeriod: true; template: true };
+  include: { clauses: true; client: true; auditPeriod: true; template: true; auditor: true };
 
 }>;
 
@@ -135,6 +139,8 @@ type OfficialContractItem = Prisma.ContractGetPayload<{
 @Injectable()
 
 export class ContractsService {
+
+  private readonly logger = new Logger(ContractsService.name);
 
   constructor(
 
@@ -440,6 +446,80 @@ export class ContractsService {
 
   }
 
+  /**
+   * Persiste el override efectivo de una sola cláusula. La plantilla y las
+   * demás cláusulas nunca se reconstruyen ni se actualizan en esta operación.
+   */
+  async updateClause(org: string, userId: string, contractId: string, clauseId: string, dto: UpdateContractClauseDto) {
+    const contract = await this.one(org, contractId);
+    const clause = contract.clauses.find((item) => item.id === clauseId);
+
+    if (!clause) throw new NotFoundException('Contract clause not found');
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const savedClause = await tx.contractClause.update({
+        where: { id: clauseId },
+        data: { body: dto.body },
+      });
+
+      // Mantiene actualizada la versión del contrato sin tocar ninguna otra cláusula.
+      await tx.contract.update({ where: { id: contractId }, data: { updatedById: userId } });
+      return savedClause;
+    });
+
+    await this.audit.record({
+      organizationId: org,
+      actorUserId: userId,
+      action: 'CONTRACT_CLAUSE_UPDATED',
+      entityType: 'ContractClause',
+      entityId: updated.id,
+      auditPeriodId: contract.auditPeriodId,
+      after: { contractId, clauseKey: updated.clauseKey },
+    });
+
+    return updated;
+  }
+
+  private async insertCustomClause(contractId:string,userId:string, data:{title:string;body:string;parentClauseKey?:string|null;insertBeforeClauseId?:string}) {
+    const clauses=await this.prisma.contractClause.findMany({where:{contractId},orderBy:{sortOrder:'asc'}});
+    const before=data.insertBeforeClauseId?clauses.find(item=>item.id===data.insertBeforeClauseId):undefined;
+    const position=before?.sortOrder ?? ((clauses.at(-1)?.sortOrder ?? -1)+1);
+    return this.prisma.$transaction(async tx=>{
+      if(before) await tx.contractClause.updateMany({where:{contractId,sortOrder:{gte:position}},data:{sortOrder:{increment:1}}});
+      const created=await tx.contractClause.create({data:{contractId,clauseKey:`custom-${randomUUID()}`,title:data.title,body:data.body,sortOrder:position,isCustom:true,parentClauseKey:data.parentClauseKey??null}});
+      await tx.contract.update({where:{id:contractId},data:{updatedById:userId}});
+      return created;
+    });
+  }
+
+  async createCustomClause(org:string,userId:string,contractId:string,dto:CreateContractClauseDto) {
+    const contract=await this.one(org,contractId);
+    if(dto.insertBeforeClauseId&&!contract.clauses.some(clause=>clause.id===dto.insertBeforeClauseId)) throw new NotFoundException('Contract clause not found');
+    const created=await this.insertCustomClause(contractId,userId,{title:dto.title,body:dto.body,insertBeforeClauseId:dto.insertBeforeClauseId});
+    await this.audit.record({organizationId:org,actorUserId:userId,action:'CONTRACT_CUSTOM_CLAUSE_CREATED',entityType:'ContractClause',entityId:created.id,auditPeriodId:contract.auditPeriodId,after:{contractId,clauseKey:created.clauseKey}});
+    return created;
+  }
+
+  async createCustomParagraph(org:string,userId:string,contractId:string,clauseId:string,dto:CreateContractParagraphDto) {
+    const contract=await this.one(org,contractId);const anchor=contract.clauses.find(item=>item.id===clauseId);
+    if(!anchor)throw new NotFoundException('Contract clause not found');
+    const sourceIndex=Number(anchor.clauseKey.replace(/^p/,''));const groupStart=[...OFFICIAL_CLAUSE_STARTS].reverse().find(item=>item<=sourceIndex)??sourceIndex;const nextStart=OFFICIAL_CLAUSE_STARTS.find(item=>item>sourceIndex);
+    const later=nextStart===undefined?undefined:contract.clauses.find(item=>item.clauseKey===`p${nextStart}`);
+    const parentClauseKey=`p${groupStart}`;
+    const created=await this.insertCustomClause(contractId,userId,{title:'',body:dto.body,parentClauseKey,insertBeforeClauseId:later?.id});
+    await this.audit.record({organizationId:org,actorUserId:userId,action:'CONTRACT_CUSTOM_PARAGRAPH_CREATED',entityType:'ContractClause',entityId:created.id,auditPeriodId:contract.auditPeriodId,after:{contractId,parentClauseKey}});
+    return created;
+  }
+
+  async deleteCustomClause(org:string,userId:string,contractId:string,clauseId:string) {
+    const contract=await this.one(org,contractId);const clause=contract.clauses.find(item=>item.id===clauseId);
+    if(!clause)throw new NotFoundException('Contract clause not found');
+    if(!clause.isCustom)throw new BadRequestException('Solo se puede eliminar contenido agregado manualmente.');
+    await this.prisma.$transaction([this.prisma.contractClause.delete({where:{id:clauseId}}),this.prisma.contract.update({where:{id:contractId},data:{updatedById:userId}})]);
+    await this.audit.record({organizationId:org,actorUserId:userId,action:'CONTRACT_CUSTOM_CONTENT_DELETED',entityType:'ContractClause',entityId:clauseId,auditPeriodId:contract.auditPeriodId,after:{contractId}});
+    return {id:clauseId,deleted:true};
+  }
+
 
 
   async contractByPeriod(org: string, periodId: string) {
@@ -670,9 +750,15 @@ export class ContractsService {
 
   async generateContractDocument(org: string, userId: string, id: string, format: GeneratedFormat) {
 
-    const item = await this.loadContextData(org, id);
+    // La plantilla oficial ya contiene todos los datos necesarios para generar.
+    // Cargarla primero evita consultar el contrato dos veces por cada solicitud.
+    const loadStarted = performance.now();
+    const officialItem = await this.one(org, id);
+    const db = performance.now() - loadStarted;
 
-    if (this.official.isOfficial(item.variables)) return this.generateOfficial(org,userId,id,format);
+    if (this.official.isOfficial(officialItem.variables)) return this.generateOfficial(org,userId,officialItem,format,db);
+
+    const item = await this.loadContextData(org, id);
 
     const validation = await this.validate(org, id);
 
@@ -922,26 +1008,87 @@ export class ContractsService {
 
 
 
-  private async generateOfficial(org:string,userId:string,id:string,format:GeneratedFormat) {
+  private async generateOfficial(org:string,userId:string,item:OfficialContractItem,format:GeneratedFormat,db:number) {
 
-    // One query captures saved content and its version for both document formats.
-
-    const item=await this.one(org,id);
+    const started=performance.now();
 
     if(!this.official.isOfficial(item.variables))throw new BadRequestException('Plantilla no compatible');
 
+    const contentHash=this.officialContentHash(item);
+    const cacheStarted=performance.now();
+    const cached=await this.currentGeneratedDocument(item,format,contentHash);
+    if(cached) {
+      this.logTiming(format,{db,cacheLookup:performance.now()-cacheStarted,total:performance.now()-started,cacheHit:1});
+      return toSafeDocument(cached);
+    }
+
+    const renderStarted=performance.now();
     const docx=await this.official.docx(item.variables,item.clauses);
 
+    const conversionStarted=performance.now();
     const buffer=format==='docx'?docx:await this.official.pdf(docx);
 
-    const record=await this.persistOfficialDocument(org,userId,item,item.variables.templateVersion,format,docx,buffer);
+    const persistStarted=performance.now();
+    const record=await this.persistOfficialDocument(org,userId,item,item.variables.templateVersion,format,docx,buffer,contentHash);
+    this.logTiming(format,{db,cacheLookup:renderStarted-cacheStarted,renderDocx:conversionStarted-renderStarted,pdfConversion:format==='pdf'?persistStarted-conversionStarted:0,persist:performance.now()-persistStarted,total:performance.now()-started});
 
     return toSafeDocument(record);
 
   }
 
 
-  private async persistOfficialDocument(org:string,userId:string,item:OfficialContractItem,templateVersion:string,format:GeneratedFormat,docx:Buffer,buffer:Buffer) {
+  private officialContentHash(item:OfficialContractItem) {
+    return createHash('sha256').update(JSON.stringify({template:item.variables,clauses:item.clauses.map(clause=>({key:clause.clauseKey,title:clause.title,body:clause.body,order:clause.sortOrder,enabled:clause.enabled,custom:clause.isCustom,parent:clause.parentClauseKey}))})).digest('hex');
+  }
+
+  async assignAuditor(org:string,userId:string,contractId:string,auditorId:string) {
+    const contract=await this.one(org,contractId);
+    const auditor=await this.prisma.auditor.findFirst({where:{id:auditorId,organizationId:org,deletedAt:null,isActive:true}});
+    if(!auditor)throw new NotFoundException('El auditor seleccionado no existe, está inactivo o no pertenece a esta organización.');
+    const snapshot={fullName:auditor.fullName,professionalTitles:auditor.professionalTitles,position:auditor.position,ruc:auditor.ruc,externalAuditorRegistration:auditor.externalAuditorRegistration,judicialExpertNumber:auditor.judicialExpertNumber,accountantLicenseNumber:auditor.accountantLicenseNumber,address:auditor.address,phone:auditor.phone,email:auditor.email};
+    const professional=`${snapshot.professionalTitles} ${snapshot.fullName}`;
+    const replacement=new Map<string,string>([
+      ['p2',`el auditor externo ${professional}, con RUC No. ${snapshot.ruc} Registro Nacional de Auditor Externo No. ${snapshot.externalAuditorRegistration}`],
+      ['p6',`Registro Nacional de Auditor Externo No. ${snapshot.externalAuditorRegistration}`],
+      ['p52',`Por " El Auditor":  Mail: ${snapshot.email}`],
+      ['p62',professional],
+      ['p63',`       ${snapshot.position.toUpperCase()}         AUDITOR EXTERNO No. ${snapshot.externalAuditorRegistration}`],
+    ]);
+    await this.prisma.$transaction(async tx=>{
+      for(const [key,needle] of replacement){const clause=contract.clauses.find(item=>item.clauseKey===key);if(!clause)continue;let body=clause.body;
+        if(key==='p2')body=body.replace(/el auditor externo[\s\S]*?parte a la que para los efectos de este contrato/i,`${needle}, parte a la que para los efectos de este contrato`);
+        else if(key==='p6')body=body.replace(/Registro Nacional de Auditor Externo No\.\s*[^;,.]+/i,needle);
+        else body=needle;
+        await tx.contractClause.update({where:{id:clause.id},data:{body}});
+      }
+      const values=contract.variables&&typeof contract.variables==='object'?JSON.parse(JSON.stringify(contract.variables)) as Record<string,unknown>:{};
+      values.AUDITOR= snapshot;
+      await tx.contract.update({where:{id:contractId},data:{auditorId:auditor.id,auditorSnapshot:JSON.parse(JSON.stringify(snapshot)),variables:values as Prisma.InputJsonValue,updatedById:userId}});
+      await tx.generatedDocument.updateMany({where:{contractId,status:'GENERATED'},data:{status:'DRAFT'}});
+    });
+    await this.audit.record({organizationId:org,actorUserId:userId,action:'CONTRACT_AUDITOR_ASSIGNED',entityType:'Contract',entityId:contractId,auditPeriodId:contract.auditPeriodId,after:{auditorId:auditor.id,professional,registration:auditor.externalAuditorRegistration}});
+    return this.one(org,contractId);
+  }
+
+  private logTiming(format:GeneratedFormat,values:Record<string,number>) {
+    if(process.env.CONTRACT_TIMING!=='1')return;
+    const line=`[contracts] ${format} ${Object.entries(values).map(([name,time])=>`${name}: ${time.toFixed(0)}ms`).join(' ')}`;
+    this.logger.log(line);
+    // Jest silencia el logger de Nest; conserva las medidas cuando se ejecuta
+    // expresamente el diagnóstico, sin emitirlas en funcionamiento normal.
+    if(process.env.JEST_WORKER_ID)process.stdout.write(`${line}\n`);
+  }
+
+  private async currentGeneratedDocument(item:OfficialContractItem,format:GeneratedFormat,contentHash:string) {
+    const previous=await this.prisma.generatedDocument.findFirst({where:{contractId:item.id,type:DOCUMENT_TYPES[format],status:'GENERATED'},orderBy:{createdAt:'desc'}});
+    const snapshot=(previous?.variablesSnapshot??null) as {contentHash?:unknown}|null;
+    if(!previous?.storageKey||snapshot?.contentHash!==contentHash)return null;
+    const dir=resolveGeneratedDir();
+    const absolute=join(dir,previous.storageKey);
+    return absolute.startsWith(dir)&&existsSync(absolute)?previous:null;
+  }
+
+  private async persistOfficialDocument(org:string,userId:string,item:OfficialContractItem,templateVersion:string,format:GeneratedFormat,docx:Buffer,buffer:Buffer,contentHash:string) {
 
     const dir=resolveGeneratedDir();
 
@@ -953,7 +1100,7 @@ export class ContractsService {
 
     const docxSha256=createHash('sha256').update(docx).digest('hex');
 
-    const record=await this.prisma.generatedDocument.create({data:{auditPeriodId:item.auditPeriodId,contractId:item.id,generatedById:userId,type:DOCUMENT_TYPES[format],status:'GENERATED',title:`Contrato ${item.auditPeriod.fiscalYear} — ${item.client.legalName}`,storageKey:fileName,originalFileName:buildPublicFileName(item.client.legalName,item.auditPeriod.fiscalYear,format),mimeType:MIME_TYPES[format],sizeBytes:BigInt(buffer.length),sha256:createHash('sha256').update(buffer).digest('hex'),templateVersion,variablesSnapshot:JSON.parse(JSON.stringify({snapshot:item.variables,sections:item.clauses,updatedAt:item.updatedAt,docxSha256})),generatedAt:new Date()}});
+    const record=await this.prisma.generatedDocument.create({data:{auditPeriodId:item.auditPeriodId,contractId:item.id,generatedById:userId,type:DOCUMENT_TYPES[format],status:'GENERATED',title:`Contrato ${item.auditPeriod.fiscalYear} — ${item.client.legalName}`,storageKey:fileName,originalFileName:buildPublicFileName(item.client.legalName,item.auditPeriod.fiscalYear,format),mimeType:MIME_TYPES[format],sizeBytes:BigInt(buffer.length),sha256:createHash('sha256').update(buffer).digest('hex'),templateVersion,variablesSnapshot:JSON.parse(JSON.stringify({snapshot:item.variables,sections:item.clauses,updatedAt:item.updatedAt,docxSha256,contentHash})),generatedAt:new Date()}});
 
     await this.audit.record({organizationId:org,actorUserId:userId,action:format==='docx'?'CONTRACT_DOCX_GENERATED':'CONTRACT_PDF_GENERATED',entityType:'GeneratedDocument',entityId:record.id,auditPeriodId:item.auditPeriodId,after:{contractId:item.id,sha256:record.sha256}});
 
@@ -971,9 +1118,20 @@ export class ContractsService {
    */
   async serveDocument(org:string,userId:string,id:string,format:GeneratedFormat) {
 
+    const started=performance.now();
     const item=await this.one(org,id);
+    const loaded=performance.now();
 
     if(this.official.isOfficial(item.variables)) {
+
+      const contentHash=this.officialContentHash(item);
+      const cached=await this.currentGeneratedDocument(item,format,contentHash);
+      if(cached?.storageKey) {
+        const readStarted=performance.now();const buffer=readFileSync(join(resolveGeneratedDir(),cached.storageKey));
+        this.logTiming(format,{db:loaded-started,cacheRead:performance.now()-readStarted,response:performance.now()-started,cacheHit:1});
+        await this.audit.record({organizationId:org,actorUserId:userId,action:'CONTRACT_DOCUMENT_DOWNLOADED',entityType:'GeneratedDocument',entityId:cached.id,auditPeriodId:item.auditPeriodId});
+        return {buffer,fileName:cached.originalFileName ?? buildPublicFileName(item.client.legalName,item.auditPeriod.fiscalYear,format),mimeType:MIME_TYPES[format]};
+      }
 
       const docx=await this.official.docx(item.variables,item.clauses);
 
@@ -1001,7 +1159,7 @@ export class ContractsService {
 
       const buffer=format==='docx'?docx:await this.official.pdf(docx);
 
-      const record=await this.persistOfficialDocument(org,userId,item,item.variables.templateVersion,format,docx,buffer);
+      const record=await this.persistOfficialDocument(org,userId,item,item.variables.templateVersion,format,docx,buffer,contentHash);
 
       return {buffer,fileName:record.originalFileName ?? buildPublicFileName(item.client.legalName,item.auditPeriod.fiscalYear,format),mimeType:MIME_TYPES[format]};
 
@@ -1049,7 +1207,7 @@ export class ContractsService {
 
       where: { id, client: { organizationId: org } },
 
-      include: { clauses: { orderBy: { sortOrder: 'asc' } }, client: true, auditPeriod: true, template: true },
+      include: { clauses: { orderBy: { sortOrder: 'asc' } }, client: true, auditPeriod: true, template: true, auditor: true },
 
     });
 

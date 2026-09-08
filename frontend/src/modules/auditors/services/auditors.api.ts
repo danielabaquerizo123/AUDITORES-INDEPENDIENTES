@@ -1,0 +1,5 @@
+import { httpClient } from '../../../services/http-client';
+export interface Auditor {id:string;fullName:string;cedula:string;ruc:string;professionalTitles:string;position:string;externalAuditorRegistration:string;judicialExpertNumber:string;accountantLicenseNumber:string;address:string;phone:string;email:string;isActive:boolean;createdAt:string;updatedAt:string;}
+export type AuditorPayload=Omit<Auditor,'id'|'isActive'|'createdAt'|'updatedAt'>;
+export interface AuditorPage {items:Auditor[];total:number;page:number;pageSize:number;}
+export const auditorsApi={list:async(page=1,search='',signal?:AbortSignal)=>(await httpClient.get<AuditorPage>('/auditors',{params:{page,pageSize:5,search},signal})).data,one:async(id:string)=>(await httpClient.get<Auditor>(`/auditors/${id}`)).data,create:async(payload:AuditorPayload)=>(await httpClient.post<Auditor>('/auditors',payload)).data,update:async(id:string,payload:AuditorPayload)=>(await httpClient.patch<Auditor>(`/auditors/${id}`,payload)).data,remove:async(id:string)=>(await httpClient.delete<{id:string;deletedAt:string}>(`/auditors/${id}`)).data};
