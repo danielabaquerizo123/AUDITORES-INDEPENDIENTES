@@ -1047,12 +1047,19 @@ export class ContractsService {
     if(!auditor)throw new NotFoundException('El auditor seleccionado no existe, está inactivo o no pertenece a esta organización.');
     const snapshot={fullName:auditor.fullName,professionalTitles:auditor.professionalTitles,position:auditor.position,ruc:auditor.ruc,externalAuditorRegistration:auditor.externalAuditorRegistration,judicialExpertNumber:auditor.judicialExpertNumber,accountantLicenseNumber:auditor.accountantLicenseNumber,address:auditor.address,phone:auditor.phone,email:auditor.email};
     const professional=`${snapshot.professionalTitles} ${snapshot.fullName}`;
+    const contractSnapshot=contract.variables&&typeof contract.variables==='object'
+      ? contract.variables as unknown as {values?:Record<string,string>}
+      : {};
+    const representativeName=contractSnapshot.values?.REPRESENTATIVE_NAME??'';
+    const representativePosition=contractSnapshot.values?.REPRESENTATIVE_POSITION??'';
+    const companyName=contractSnapshot.values?.COMPANY_NAME??contract.client.legalName;
     const replacement=new Map<string,string>([
       ['p2',`el auditor externo ${professional}, con RUC No. ${snapshot.ruc} Registro Nacional de Auditor Externo No. ${snapshot.externalAuditorRegistration}`],
       ['p6',`Registro Nacional de Auditor Externo No. ${snapshot.externalAuditorRegistration}`],
       ['p52',`Por " El Auditor":  Mail: ${snapshot.email}`],
-      ['p62',professional],
-      ['p63',`       ${snapshot.position.toUpperCase()}         AUDITOR EXTERNO No. ${snapshot.externalAuditorRegistration}`],
+      ['p62',`${representativeName}        ${professional}`],
+      ['p63',`${representativePosition}        AUDITOR EXTERNO No. ${snapshot.externalAuditorRegistration}`],
+      ['p64',companyName],
     ]);
     await this.prisma.$transaction(async tx=>{
       for(const [key,needle] of replacement){const clause=contract.clauses.find(item=>item.clauseKey===key);if(!clause)continue;let body=clause.body;

@@ -173,9 +173,26 @@ export class OfficialContractDocument {
   if(!signatureFont)throw new Error('No se pudo obtener la fuente de la plantilla para las firmas.');
   const paragraphs=[...xml.matchAll(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g)];
   if(paragraphs.length!==this.map.paragraphs.length)throw new Error('Estructura DOCX inesperada');
-  const base=sections.filter(section=>!section.isCustom&&/^p\d+$/.test(section.clauseKey));
-  const byKey=new Map(base.map(s=>[s.clauseKey,s.body]));
-  const additions=new Map<string,typeof sections>();let previous='';
+const base=sections.filter(section=>!section.isCustom&&/^p\d+$/.test(section.clauseKey));
+ const byKey=new Map(base.map(s=>[s.clauseKey,s.body]));
+ // Bloque de firmas: si el cuerpo guardado de p62-p64 no conservó la forma de
+ // dos columnas (p. ej. contratos asignados antes de que el bloque fuese una
+ // tabla), se reconstruye desde los datos del contrato y del auditor para que
+ // firma y auditor siempre queden en su columna. Solo toca las tres firmas.
+ const signatureColumns=(text:string|undefined)=>text?text.split(/\s{2,}|\t+/).map(part=>part.trim()).filter(Boolean):[];
+ const signatureAuditor=snapshot.AUDITOR;
+ const signatureValues=(snapshot.values??{}) as Record<string,string>;
+ const representativeName=(signatureValues.REPRESENTATIVE_NAME??'').trim();
+ const representativePosition=(signatureValues.REPRESENTATIVE_POSITION??'').trim();
+ const companyName=(signatureValues.COMPANY_NAME??'').trim();
+ const professional=signatureAuditor?`${signatureAuditor.professionalTitles} ${signatureAuditor.fullName}`.trim():'';
+ const registration=signatureAuditor?`AUDITOR EXTERNO No. ${signatureAuditor.externalAuditorRegistration}`.trim():'';
+ if(signatureColumns(byKey.get('p62')).length!==2||signatureColumns(byKey.get('p63')).length!==2||!(byKey.get('p64')??'').trim()){
+  byKey.set('p62',`${representativeName}        ${professional}`.trimEnd());
+  byKey.set('p63',`${representativePosition}        ${registration}`.trimEnd());
+  byKey.set('p64',companyName);
+ }
+ const additions=new Map<string,typeof sections>();let previous='';
   for(const section of sections.slice().sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0))){if(!section.isCustom&&/^p\d+$/.test(section.clauseKey))previous=section.clauseKey;else if(section.isCustom&&previous){const items=additions.get(previous)??[];items.push(section);additions.set(previous,items);}}
   for(let i=paragraphs.length-1;i>=0;i--){const p=paragraphs[i];if(textOf(p[0])!==this.map.paragraphs[i])throw new Error('Texto DOCX inesperado');const body=byKey.get(`p${i}`);if(body===undefined)continue;const ranges=this.map.slots.filter(s=>s.paragraph===i).map(slot=>{const raw=snapshot.values[slot.key]??'';return {start:slot.start,end:slot.end,value:slot.upper?raw.toLocaleUpperCase('es'):raw};}).filter(slot=>this.map.paragraphs[i].slice(slot.start,slot.end)!==slot.value);
     // Semantic substitutions inherit the first run of their verified slot. Manual
@@ -185,7 +202,7 @@ export class OfficialContractDocument {
     const bodyParagraph=patchParagraph(p[0],item.body);
     return item.title?.trim()?`${patchParagraph(p[0],item.title)}${bodyParagraph}`:bodyParagraph;
   }).join('');xml=xml.slice(0,p.index!)+edited+custom+xml.slice(p.index!+p[0].length);}
-  xml=signaturesTable(xml,signatureFont,[this.map.paragraphs[62],this.map.paragraphs[63],this.map.paragraphs[64]]);
+  xml=signaturesTable(xml,signatureFont,[byKey.get('p62')??this.map.paragraphs[62],byKey.get('p63')??this.map.paragraphs[63],byKey.get('p64')??this.map.paragraphs[64]]);
   const legacyAuditor=(snapshot.values as unknown as {AUDITOR?:AuditorFooterSnapshot}).AUDITOR;
   const auditor=snapshot.AUDITOR??legacyAuditor;
   if(auditor)for(const name of Object.keys(zip.files).filter(name=>/^word\/(footer|header)\d+\.xml$/.test(name))){const part=zip.file(name);if(part)zip.file(name,patchAuditorFooterPart(await part.async('string'),auditor),{date:zip.files[name].date});}

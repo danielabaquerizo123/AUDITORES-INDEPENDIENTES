@@ -49,5 +49,34 @@ describe('Plantilla oficial DOCX',()=>{
   expect(outParas.slice(62)).toEqual([nL,nR,rL,rR,cL,'']);
   expect(xml.replace(/<[^>]+>/g,'')).toContain('20 días hábiles');
  });
+ test('mantiene representante y auditor en columnas semánticas independientes',async()=>{
+  const values={};for(const slot of engine.map.slots)values[slot.key]=slot.expected;
+  values.COMPANY_NAME='RCA';values.REPRESENTATIVE_NAME='MARIZOL CEPEDA CASTRO';values.REPRESENTATIVE_POSITION='GERENTE GENERAL';
+  const snapshot=engine.snapshot(values),sections=engine.sections(snapshot);
+  sections.find(s=>s.clauseKey==='p62').body='MARIZOL CEPEDA CASTRO        Ing. CPA. Carlos Andrés Mendoza Vélez';
+  sections.find(s=>s.clauseKey==='p63').body='GERENTE GENERAL        AUDITOR EXTERNO No. SCVS-RNAE-3185';
+  sections.find(s=>s.clauseKey==='p64').body='RCA';
+  const result=await JSZip.loadAsync(await engine.docx(snapshot,sections));
+  const xml=await result.file('word/document.xml').async('string');
+  const table=[...xml.matchAll(/<w:tbl>[\s\S]*?<\/w:tbl>/g)].at(-1)[0];
+  const cells=[...table.matchAll(/<w:tc>[\s\S]*?<\/w:tc>/g)].map(match=>match[0].replace(/<[^>]+>/g,''));
+  expect(cells).toEqual(['MARIZOL CEPEDA CASTRO','Ing. CPA. Carlos Andrés Mendoza Vélez','GERENTE GENERAL','AUDITOR EXTERNO No. SCVS-RNAE-3185','RCA','']);
+expect(cells[0]+cells[2]+cells[4]).not.toMatch(/Carlos|SCVS-RNAE-3185/);
+  expect(cells[1]+cells[3]+cells[5]).not.toMatch(/RCA|SOCIO CONSULTOR/);
+ });
+ test('reconstruye firmas ordenadas cuando el cuerpo guardado quedó con un solo firmante',async()=>{
+  const values={};for(const slot of engine.map.slots)values[slot.key]=slot.expected;
+  values.COMPANY_NAME='RCA';values.REPRESENTATIVE_NAME='MARIZOL CEPEDA CASTRO';values.REPRESENTATIVE_POSITION='GERENTE GENERAL';
+  const snapshot=engine.snapshot(values),sections=engine.sections(snapshot);
+  snapshot.AUDITOR={professionalTitles:'Ing. CPA.',fullName:'Carlos Andrés Mendoza Vélez',position:'GERENTE GENERAL',ruc:'9999999999001',externalAuditorRegistration:'SCVS-RNAE-3185',judicialExpertNumber:'',accountantLicenseNumber:'',address:'',phone:'',email:''};
+  sections.find(s=>s.clauseKey==='p62').body='Ing. CPA. Carlos Andrés Mendoza Vélez';
+  sections.find(s=>s.clauseKey==='p63').body='GERENTE GENERAL        AUDITOR EXTERNO No. SCVS-RNAE-3185';
+  sections.find(s=>s.clauseKey==='p64').body='RCA';
+  const result=await JSZip.loadAsync(await engine.docx(snapshot,sections));
+  const xml=await result.file('word/document.xml').async('string');
+  const table=[...xml.matchAll(/<w:tbl>[\s\S]*?<\/w:tbl>/g)].at(-1)[0];
+  const cells=[...table.matchAll(/<w:tc>[\s\S]*?<\/w:tc>/g)].map(match=>match[0].replace(/<[^>]+>/g,''));
+  expect(cells).toEqual(['MARIZOL CEPEDA CASTRO','Ing. CPA. Carlos Andrés Mendoza Vélez','GERENTE GENERAL','AUDITOR EXTERNO No. SCVS-RNAE-3185','RCA','']);
+ });
 });
 
