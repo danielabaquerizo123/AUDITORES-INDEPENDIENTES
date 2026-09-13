@@ -1,5 +1,5 @@
 import { QueryClient,QueryClientProvider } from '@tanstack/react-query';
-import { cleanup,fireEvent,render,screen } from '@testing-library/react';
+import { cleanup,fireEvent,render,screen,within } from '@testing-library/react';
 import { MemoryRouter,Route,Routes } from 'react-router-dom';
 import { beforeEach,expect,it,vi } from 'vitest';
 import { ContractDocumentPage } from './contract-document-page';
@@ -77,3 +77,26 @@ it('edita y elimina solo un párrafo agregado',async()=>{
  fireEvent.click(screen.getAllByRole('button',{name:/^Eliminar$/})[1]);await vi.waitFor(()=>expect(deleteClause).toHaveBeenCalledWith('ct1','custom-1'));
 });
 
+
+it('no convierte texto sin año como una dirección en fecha editable',async()=>{
+ const body='OCTAVA - HONORARIOS PARA LA AUDITORÍA. Dirección: calles 10 de agosto y 24 de mayo.';getContract.mockResolvedValue({...contract,clauses:clauses.map(clause=>clause.id==='cl47'?{...clause,body}:clause)});show();await screen.findByText(/Cada cláusula se edita/);
+ fireEvent.click(screen.getByRole('button',{name:'Editar OCTAVA - HONORARIOS PARA LA AUDITORÍA'}));expect(screen.queryByRole('button',{name:/Editar fecha/})).not.toBeInTheDocument();expect(screen.getByLabelText('Contenido editable')).toBeInstanceOf(HTMLTextAreaElement);
+});
+it('edita una fecha completa con calendario inline y guarda el borrador',async()=>{
+ const body='OCTAVA - HONORARIOS PARA LA AUDITORÍA. Fecha de entrega de información: 31 de diciembre del 2026.';
+ getContract.mockResolvedValue({...contract,clauses:clauses.map(clause=>clause.id==='cl47'?{...clause,body}:clause)});show();await screen.findByText(/Cada cláusula se edita/);
+ fireEvent.click(screen.getByRole('button',{name:'Editar OCTAVA - HONORARIOS PARA LA AUDITORÍA'}));fireEvent.click(screen.getByRole('button',{name:'Editar fecha 31 de diciembre del 2026'}));expect(screen.getByRole('dialog',{name:'Cambiar fecha'})).toBeInTheDocument();
+ fireEvent.change(screen.getByLabelText('Mes del calendario'),{target:{value:'10'}});fireEvent.change(screen.getByLabelText('Año del calendario'),{target:{value:'2027'}});fireEvent.click(screen.getByRole('button',{name:'Día 15'}));fireEvent.click(screen.getByRole('button',{name:'Aplicar'}));
+ expect(screen.queryByRole('dialog')).not.toBeInTheDocument();expect(screen.getByRole('button',{name:'Editar fecha 15 de noviembre del 2027'})).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Guardar'}));await vi.waitFor(()=>expect(updateClause).toHaveBeenCalledWith('ct1','cl47',expect.stringContaining('15 de noviembre del 2027')));
+});
+it('mes-año cancela sin cambiar y SÉPTIMA edita ocurrencias iguales por separado',async()=>{
+ const body='SÉPTIMA - INFORMES. “El Auditor” presentará el borrador del informe en el mes de abril del 2026. Los informes por emitirse deberán ser entregados hasta abril del 2026. El informe de cumplimiento de obligaciones tributarias será entregado hasta julio del 2026.';
+ const datedClauses=[...clauses,{id:'cl40',clauseKey:'p40',title:'Sección 40',body,sortOrder:40,enabled:true}].sort((a,b)=>a.sortOrder-b.sortOrder);getContract.mockResolvedValue({...contract,clauses:datedClauses});show();await screen.findByText(/Cada cláusula se edita/);
+ fireEvent.click(screen.getByRole('button',{name:'Editar SÉPTIMA - INFORMES'}));const april=screen.getAllByRole('button',{name:'Editar fecha abril del 2026'});expect(april).toHaveLength(2);expect(screen.getByRole('button',{name:'Editar fecha julio del 2026'})).toBeInTheDocument();
+ fireEvent.click(april[0]);const firstDialog=screen.getByRole('dialog',{name:'Cambiar mes y año'});expect(firstDialog).toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'julio'}));fireEvent.click(within(firstDialog).getByRole('button',{name:'Cancelar'}));expect(screen.getAllByRole('button',{name:'Editar fecha abril del 2026'})).toHaveLength(2);
+ fireEvent.click(screen.getAllByRole('button',{name:'Editar fecha abril del 2026'})[0]);fireEvent.keyDown(document,{key:'Escape'});expect(screen.queryByRole('dialog')).not.toBeInTheDocument();fireEvent.click(screen.getAllByRole('button',{name:'Editar fecha abril del 2026'})[0]);fireEvent.pointerDown(document.body);expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+ fireEvent.click(screen.getAllByRole('button',{name:'Editar fecha abril del 2026'})[0]);fireEvent.click(screen.getAllByRole('button',{name:'Editar fecha abril del 2026'})[1]);expect(screen.getAllByRole('dialog')).toHaveLength(1);fireEvent.click(screen.getByRole('button',{name:'mayo'}));fireEvent.click(screen.getByRole('button',{name:'Año siguiente'}));fireEvent.click(screen.getByRole('button',{name:'Aplicar'}));
+ expect(screen.getAllByRole('button',{name:'Editar fecha abril del 2026'})).toHaveLength(1);expect(screen.getByRole('button',{name:'Editar fecha mayo del 2027'})).toBeInTheDocument();expect(screen.getByRole('button',{name:'Editar fecha julio del 2026'})).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Guardar'}));await vi.waitFor(()=>expect(updateClause).toHaveBeenCalledWith('ct1','cl40',expect.stringMatching(/abril del 2026.*mayo del 2027.*julio del 2026/)));
+});

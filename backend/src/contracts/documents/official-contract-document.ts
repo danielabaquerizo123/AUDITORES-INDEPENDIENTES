@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { existsSync, readFileSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFile } from 'child_process';
@@ -14,6 +14,7 @@ const decode=(s:string)=>s.replace(/&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos);/gi,(
 const encode=(s:string)=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
 const texts=(xml:string)=>[...xml.matchAll(/<w:t(?:\s[^>]*)?>[\s\S]*?<\/w:t>/g)];
 const textOf=(xml:string)=>texts(xml).map(x=>decode(x[0].replace(/^<w:t(?:\s[^>]*)?>|<\/w:t>$/g,''))).join('');
+export const readNonEmptyPdf=(path:string):Buffer|null=>{try{return existsSync(path)&&statSync(path).size>0?readFileSync(path):null;}catch{return null;}};
 
 function resolveContractTemplatesDir(): string {
  const candidates=[
@@ -190,13 +191,46 @@ export class OfficialContractDocument {
   if(auditor)for(const name of Object.keys(zip.files).filter(name=>/^word\/(footer|header)\d+\.xml$/.test(name))){const part=zip.file(name);if(part)zip.file(name,patchAuditorFooterPart(await part.async('string'),auditor),{date:zip.files[name].date});}
   zip.file('word/document.xml',xml,{date:zip.files['word/document.xml'].date});return zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'});
   }
+ private libreOfficeCandidates(){
+  const configured=process.env.LIBREOFFICE_PATH?.trim(),candidates:string[]=[];
+  if(configured)candidates.push(configured);
+  if(process.platform==='win32')for(const path of ['C:\\Program Files\\LibreOffice\\program\\soffice.exe','C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe'])if(existsSync(path)&&!candidates.includes(path))candidates.push(path);
+  else for(const command of ['soffice','libreoffice'])if(!candidates.includes(command))candidates.push(command);
+  return candidates;
+ }
+ private async convertWithLibreOffice(input:string,output:string,dir:string){
+  const candidates=this.libreOfficeCandidates();if(!candidates.length){this.logger.warn('[PDF] LibreOffice no disponible');return false;}
+  for(const executable of candidates){this.logger.log(`[PDF] Intentando conversión con LibreOffice: ${executable}`);try{
+   await promisify(execFile)(executable,['--headless','--convert-to','pdf','--outdir',dir,input],{windowsHide:true,timeout:120000,maxBuffer:1024*1024});
+   if(readNonEmptyPdf(output)){this.logger.log('[PDF] LibreOffice exitoso');return true;}
+   this.logger.warn('[PDF] LibreOffice no produjo un PDF válido');
+  }catch(error){const unavailable=(error as NodeJS.ErrnoException)?.code==='ENOENT';this.logger.warn(`[PDF] LibreOffice ${unavailable?'no disponible':'falló'}: ${error instanceof Error?error.message:String(error)}`);}rmSync(output,{force:true});}
+  return false;
+ }
+private wordShellCandidates(){
+  const configured=process.env.POWERSHELL_PATH?.trim(),candidates:string[]=[];
+  if(configured)candidates.push(configured);
+  if(process.platform==='win32')for(const shell of ['pwsh.exe','powershell.exe'])if(!candidates.includes(shell))candidates.push(shell);
+  return candidates;
+ }
+ private async convertWithWord(input:string,output:string){
+  if(process.platform!=='win32')return false;const candidates=this.wordShellCandidates();if(!candidates.length){this.logger.warn('[PDF] PowerShell no disponible');return false;}
+  const script=join(this.folder,'../../../scripts/contract-to-pdf.ps1');
+  for(const shell of candidates){this.logger.log(`[PDF] Intentando Microsoft Word con ${shell}`);try{
+   await promisify(execFile)(shell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',script,'-InputPath',input,'-OutputPath',output],{windowsHide:true,timeout:120000,maxBuffer:1024*1024});
+   if(readNonEmptyPdf(output)){this.logger.log('[PDF] Microsoft Word exitoso');return true;}this.logger.warn('[PDF] Microsoft Word no produjo un PDF válido');return false;
+  }catch(error){if(readNonEmptyPdf(output)){this.logger.warn(`[PDF] Warning cerrando Word después de generar el PDF: ${error instanceof Error?error.message:String(error)}`);return true;}
+   const shellMissing=(error as NodeJS.ErrnoException)?.code==='ENOENT';if(!shellMissing){this.logger.warn(`[PDF] Microsoft Word falló: ${error instanceof Error?error.message:String(error)}`);return false;}
+   this.logger.warn(`[PDF] ${shell} no disponible`);}
+  }
+  return false;
+ }
  async pdf(docx:Buffer):Promise<Buffer>{
-  const run=async()=>{const dir=mkdtempSync(join(tmpdir(),'audit-contract-'));try{
-   const input=join(dir,'contract.docx'),output=join(dir,'contract.pdf');writeFileSync(input,docx);
-   if(process.platform!=='win32')throw new Error('Microsoft Word en Windows es necesario para conservar la fidelidad de esta plantilla.');
-   await promisify(execFile)('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',join(this.folder,'../../../scripts/contract-to-pdf.ps1'),'-InputPath',input,'-OutputPath',output],{windowsHide:true,timeout:120000,maxBuffer:1024*1024});
-    return readFileSync(output);
-   }catch(error){this.logger.error(`DOCX->PDF con Microsoft Word falló para ${dir}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);throw new ServiceUnavailableException('No se pudo convertir con Microsoft Word. Verifique que Word esté instalado y disponible en la sesión del servidor; el Word guardado no se ha alterado.');}finally{rmSync(dir,{recursive:true,force:true});}};
+  const run=async()=>{const dir=mkdtempSync(join(tmpdir(),'audit-contract-')),input=join(dir,'contract.docx'),output=join(dir,'contract.pdf');try{
+   writeFileSync(input,docx);
+   const converted=await this.convertWithLibreOffice(input,output,dir)||await this.convertWithWord(input,output),pdf=converted?readNonEmptyPdf(output):null;
+   if(pdf)return pdf;this.logger.error(`[PDF] Conversión fallida para ${dir}`);throw new ServiceUnavailableException('No se pudo generar el PDF. Verifique que LibreOffice o Microsoft Word estén disponibles en el servidor.');
+   }finally{rmSync(dir,{recursive:true,force:true});}};
   const result=this.pdfQueue.then(run,run);this.pdfQueue=result.catch(()=>undefined);return result;
  }
 }

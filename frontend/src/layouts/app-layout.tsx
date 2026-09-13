@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, Outlet, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../app/use-auth';
 import { DashboardIcon, type IconName } from '../components/dashboard/dashboard-icon';
 import '../styles/dashboard.css';
@@ -18,12 +18,12 @@ function Sidebar({ open, close }: { open: boolean; close: () => void }) {
 }
 function DashboardHeader({ toggle, open }: { toggle: () => void; open: boolean }) {
  const { user, logout } = useAuth(); const navigate = useNavigate();
- const location = useLocation(); const [searchParams] = useSearchParams(); const isClients = /^\/(clientes|clients)(\/|$)/.test(location.pathname); const isAuditors = /^\/auditores(\/|$)/.test(location.pathname);
+ const location = useLocation(); const route=location.pathname.replace(/\/+$/,'')||'/'; const hideGlobalSearch=['/clientes','/auditores','/contratos'].includes(route);
  const name = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || 'Usuario';
  const initials = name.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase();
  return <header className="dashboard-header">
   <button className="dashboard-menu" onClick={toggle} aria-label="Abrir navegación" aria-expanded={open} aria-controls="dashboard-navigation"><DashboardIcon name="menu" /></button>
-  <div className="dashboard-search" title={isClients || isAuditors ? undefined : "Búsqueda global aún no disponible"}><DashboardIcon name="search" />{isClients ? <input key="clients-search" aria-label="Buscar empresa, RUC o representante" placeholder="Buscar empresa, RUC o representante..." value={searchParams.get("q") ?? ""} onChange={event => navigate(`/clientes?q=${encodeURIComponent(event.target.value)}`, { replace: true })} /> : isAuditors ? <input key="auditors-search" aria-label="Buscar auditor" placeholder="Buscar auditor..." value={searchParams.get('q') ?? ''} onChange={event => navigate(`/auditores?q=${encodeURIComponent(event.target.value)}`, { replace: true })} /> : <input key="global-search" aria-label="Buscar empresa, RUC o documento (próximamente)" placeholder="Buscar empresa, RUC o documento..." disabled />}</div>
+  {hideGlobalSearch?<div className="dashboard-header-spacer" style={{flex:1,minWidth:0}}/>:<div className="dashboard-search" title="Búsqueda global aún no disponible"><DashboardIcon name="search" /><input aria-label="Buscar empresa, RUC o documento (próximamente)" placeholder="Buscar empresa, RUC o documento..." disabled /></div>}
   <span className="dashboard-bell" title="Notificaciones aún no disponibles" aria-label="Notificaciones aún no disponibles"><DashboardIcon name="bell" /></span>
   <details className="dashboard-account"><summary><span className="dashboard-avatar">{initials}</span><span className="dashboard-account-name"><strong>{name}</strong><small>Usuario único</small></span><DashboardIcon name="chevron" /></summary><div className="dashboard-account-menu"><button onClick={async () => { await logout(); navigate('/login', { replace: true }); }}>Salir</button></div></details>
  </header>;

@@ -1,0 +1,2 @@
+.module-toast{position:fixed;top:82px;right:24px;z-index:1000;max-width:440px;margin:0!important;box-shadow:0 8px 24px rgba(56,35,22,.18)}
+@media(max-width:700px){.module-toast{top:74px;left:14px;right:14px;max-width:none}}
