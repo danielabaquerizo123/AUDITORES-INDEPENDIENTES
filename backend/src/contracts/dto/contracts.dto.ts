@@ -13,6 +13,10 @@ import {
 } from 'class-validator';
 import { ContractStatus } from '@prisma/client';
 
+// Rechaza controles C0/C1 no imprimibles, conservando tabulaciones y saltos de línea (TAB, LF y CR).
+// eslint-disable-next-line no-control-regex
+const CONTRACT_BODY_PATTERN = /^[^\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]*$/u;
+
 export class TemplateClauseDto {
   @IsString()
   clauseKey!: string;
@@ -87,22 +91,22 @@ export class CreateContractDto {
 
 export class ContractSectionEditDto {
  @IsString() @Matches(/^p\d+$/) clauseKey!: string;
- @IsString() @MaxLength(50000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
+ @IsString() @MaxLength(50000) @Matches(CONTRACT_BODY_PATTERN) body!: string;
 }
 
 /** Contenido de una única cláusula persistida del contrato. */
 export class UpdateContractClauseDto {
- @IsString() @MaxLength(50000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
+ @IsString() @MaxLength(50000) @Matches(CONTRACT_BODY_PATTERN) body!: string;
 }
 
 export class CreateContractClauseDto {
  @IsString() @IsNotEmpty() @MaxLength(240) title!: string;
- @IsString() @IsNotEmpty() @MaxLength(50000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
+ @IsString() @IsNotEmpty() @MaxLength(50000) @Matches(CONTRACT_BODY_PATTERN) body!: string;
  @IsOptional() @IsString() insertBeforeClauseId?: string;
 }
 
 export class CreateContractParagraphDto {
- @IsString() @IsNotEmpty() @MaxLength(50000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
+ @IsString() @IsNotEmpty() @MaxLength(50000) @Matches(CONTRACT_BODY_PATTERN) body!: string;
 }
 
 export class PrepareOfficialContractDto {
