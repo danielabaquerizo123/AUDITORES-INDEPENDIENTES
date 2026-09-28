@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../../app/use-auth';
+import { useToast } from '../../../app/use-toast';
 import { getApiErrorMessage, getApiStatus } from '../../clients/services/clients.api';
 import {
   contractsApi,
@@ -21,6 +22,7 @@ interface ContractSectionProps {
 
 export function ContractSection({ periodId }: ContractSectionProps) {
   const { hasPermission } = useAuth();
+  const { showToast } = useToast();
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -72,10 +74,11 @@ export function ContractSection({ periodId }: ContractSectionProps) {
     onSuccess: () => {
       setServerError(null);
       setCreating(false);
+      showToast('Contrato creado correctamente.','success');
       invalidateContract();
     },
     onError: (error: unknown) => {
-      setServerError(getApiErrorMessage(error, 'No fue posible crear el contrato.'));
+      showToast(getApiErrorMessage(error, 'No fue posible crear el contrato.'),'error');
     },
   });
 
@@ -85,10 +88,11 @@ export function ContractSection({ periodId }: ContractSectionProps) {
     onSuccess: () => {
       setServerError(null);
       setEditing(false);
+      showToast('Cambios del contrato guardados correctamente.','success');
       invalidateContract();
     },
     onError: (error: unknown) => {
-      setServerError(getApiErrorMessage(error, 'No fue posible actualizar el contrato.'));
+      showToast(getApiErrorMessage(error, 'No fue posible actualizar el contrato.'),'error');
     },
   });
 

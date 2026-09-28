@@ -52,16 +52,25 @@ export interface UpdateClientPayload {
 }
 
 export function getApiErrorMessage(error: unknown, fallback: string): string {
+  const normalize = (message: string) => {
+    if (/body\s+must\s+match|\\p\{Cc\}|regular expression/i.test(message)) {
+      return 'El contenido contiene caracteres no permitidos. Revíselo e inténtelo de nuevo.';
+    }
+    if (/must (?:match|be|contain|not be)|should not be empty|is not valid/i.test(message)) {
+      return 'Revise la información ingresada e inténtelo de nuevo.';
+    }
+    return message;
+  };
   if (typeof error === 'object' && error !== null) {
     const data = (error as { response?: { data?: { message?: unknown }; status?: number } }).response?.data
       ?.message;
-    if (typeof data === 'string' && data.length > 0) return data;
+    if (typeof data === 'string' && data.length > 0) return normalize(data);
     if (Array.isArray(data)) {
       const first = data.find((item): item is string => typeof item === 'string');
-      if (first) return first;
+      if (first) return normalize(first);
     }
   }
-  if (error instanceof Error && error.message) return error.message;
+  if (error instanceof Error && error.message) return normalize(error.message);
   return fallback;
 }
 

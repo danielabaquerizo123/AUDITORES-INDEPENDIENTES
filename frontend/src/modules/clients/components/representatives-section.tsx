@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../../app/use-auth';
+import { useToast } from '../../../app/use-toast';
 import { getApiErrorMessage, getApiStatus } from '../services/clients.api';
 import {
   representativesApi,
@@ -18,10 +19,10 @@ import { RepresentativeForm } from './representative-form';
 
 export function RepresentativesSection({ clientId }: { clientId: string }) {
   const { hasPermission } = useAuth();
+  const { showToast } = useToast();
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [serverError, setServerError] = useState<string | null>(null);
 
   const query = useQuery({
     queryKey: ['clients', clientId, 'representatives'],
@@ -36,12 +37,12 @@ export function RepresentativesSection({ clientId }: { clientId: string }) {
     mutationFn: (payload: CreateRepresentativePayload) =>
       representativesApi.createRepresentative(clientId, payload),
     onSuccess: () => {
-      setServerError(null);
       setCreating(false);
+      showToast('Representante creado correctamente.','success');
       void invalidate();
     },
     onError: (error: unknown) => {
-      setServerError(getApiErrorMessage(error, 'No fue posible crear el representante.'));
+      showToast(getApiErrorMessage(error, 'No fue posible crear el representante.'),'error');
     },
   });
 
@@ -49,12 +50,12 @@ export function RepresentativesSection({ clientId }: { clientId: string }) {
     mutationFn: ({ id, payload }: { id: string; payload: UpdateRepresentativePayload }) =>
       representativesApi.updateRepresentative(clientId, id, payload),
     onSuccess: () => {
-      setServerError(null);
       setEditingId(null);
+      showToast('Representante actualizado correctamente.','success');
       void invalidate();
     },
     onError: (error: unknown) => {
-      setServerError(getApiErrorMessage(error, 'No fue posible actualizar el representante.'));
+      showToast(getApiErrorMessage(error, 'No fue posible actualizar el representante.'),'error');
     },
   });
 
@@ -87,7 +88,6 @@ export function RepresentativesSection({ clientId }: { clientId: string }) {
         {canWrite && !creating && (
           <button
             onClick={() => {
-              setServerError(null);
               setEditingId(null);
               setCreating(true);
             }}
@@ -104,10 +104,9 @@ export function RepresentativesSection({ clientId }: { clientId: string }) {
           defaultValues={{ treatment: 'Sr.', fullName: '', isPrimary: false }}
           submitLabel="Crear representante"
           isPending={createMutation.isPending}
-          serverError={serverError}
+          serverError={null}
           onCancel={() => {
             setCreating(false);
-            setServerError(null);
           }}
           onSubmit={(payload) =>
             createMutation.mutate(payload as CreateRepresentativePayload)
@@ -148,7 +147,6 @@ export function RepresentativesSection({ clientId }: { clientId: string }) {
                         <button
                           className="text-blue-900 underline"
                           onClick={() => {
-                            setServerError(null);
                             setCreating(false);
                             setEditingId(item.id);
                           }}
@@ -192,7 +190,6 @@ export function RepresentativesSection({ clientId }: { clientId: string }) {
                   <button
                     className="mt-3 text-sm text-blue-900 underline"
                     onClick={() => {
-                      setServerError(null);
                       setCreating(false);
                       setEditingId(item.id);
                     }}
@@ -213,10 +210,9 @@ export function RepresentativesSection({ clientId }: { clientId: string }) {
           defaultValues={representativeToDefaults(editing)}
           submitLabel="Guardar cambios"
           isPending={updateMutation.isPending}
-          serverError={serverError}
+          serverError={null}
           onCancel={() => {
             setEditingId(null);
-            setServerError(null);
           }}
           onSubmit={(payload) =>
             updateMutation.mutate({

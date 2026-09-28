@@ -2,6 +2,7 @@ jest.setTimeout(30000);
 const fs=require('fs');
 const JSZip=require('jszip');
 const {OfficialContractDocument,patchParagraph}=require('../dist/src/contracts/documents/official-contract-document');
+const {OFFICIAL_UAFE_BODY,OFFICIAL_UAFE_CLAUSE_KEY,prepareNewOfficialContractSections}=require('../dist/src/contracts/official-contract-content');
 describe('Plantilla oficial DOCX',()=>{
  const engine=new OfficialContractDocument();
  test('reemplaza a través de runs sin alterar sus propiedades',()=>{
@@ -40,14 +41,58 @@ describe('Plantilla oficial DOCX',()=>{
   expect(table).not.toMatch(/ {2,}/);
   const parasOf=s=>[...s.matchAll(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>|<w:p\/>/g)].map(m=>[...m[0].matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)].map(n=>n[1]).join(''));
   const srcParas=parasOf(source),outParas=parasOf(xml);
-  expect(outParas.length).toBe(srcParas.length+3);
+  expect(outParas.length).toBe(srcParas.length+2);
   const byKey=Object.fromEntries(sections.map(s=>[s.clauseKey,s.body]));
-  const exp060=[];for(let i=0;i<=61;i++)exp060.push(i===61?'':byKey[`p${i}`]);
-  expect(outParas.slice(0,62)).toEqual(exp060);
+  const exp161=[];for(let i=1;i<=61;i++)exp161.push(i===61?'':byKey[`p${i}`]);
+  expect(outParas.slice(0,61)).toEqual(exp161);
   const split=t=>t.split(/\s{2,}|\t+/).map(x=>x.trim()).filter(Boolean);
   const [nL,nR]=split(byKey.p62),[rL,rR]=split(byKey.p63),[cL]=split(byKey.p64);
-  expect(outParas.slice(62)).toEqual([nL,nR,rL,rR,cL,'']);
+  expect(outParas.slice(61)).toEqual([nL,nR,rL,rR,cL,'']);
   expect(xml.replace(/<[^>]+>/g,'')).toContain('20 días hábiles');
+ });
+ test('omite p0 en la salida y conserva p1, su año dinámico y el formato de referencia',async()=>{
+  const values={};for(const slot of engine.map.slots)values[slot.key]=slot.expected;values.AUDITED_YEAR='2036';
+  const snapshot=engine.snapshot(values),sections=engine.sections(snapshot);
+  expect(sections.find(section=>section.clauseKey==='p0').body).toBe(engine.map.paragraphs[0]);
+  expect(sections.find(section=>section.clauseKey==='p1').body).toContain('2036');
+  expect(sections.find(section=>section.clauseKey==='p5').clauseKey).toBe('p5');
+  expect(sections.find(section=>section.clauseKey==='p57').clauseKey).toBe('p57');
+  expect(sections.find(section=>section.clauseKey==='p60').clauseKey).toBe('p60');
+  const result=await JSZip.loadAsync(await engine.docx(snapshot,sections));
+  const xml=await result.file('word/document.xml').async('string');
+  const paragraphs=[...xml.matchAll(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>|<w:p\/>/g)].map(match=>match[0]);
+  const text=paragraph=>paragraph.replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'");
+  const title='CONTRATO DE PRESTACION DE SERVICIOS PROFESIONALES DE AUDITORIA EXTERNA A LOS ESTADOS FINANCIEROS POR EL AÑO TERMINADO AL 31 DE DICIEMBRE DEL 2036';
+  expect(paragraphs.map(text).filter(body=>body.startsWith('CONTRATO DE PRESTACION'))).toEqual([title]);
+  expect(paragraphs.map(text)[0]).toBe(title);
+  expect(paragraphs.map(text)[1]).toMatch(/^PRIMERA\. - COMPARECIENTES\./);
+  const titleXml=paragraphs.find(paragraph=>text(paragraph)===title);
+  expect(titleXml).toContain('<w:b/>');
+  expect(titleXml).toContain('<w:u w:val="single"/>');
+ });
+ test('usa el año guardado en el body de p1 para el DOCX sin sincronizar el snapshot',async()=>{
+  const values={};for(const slot of engine.map.slots)values[slot.key]=slot.expected;values.AUDITED_YEAR='2026';
+  const snapshot=engine.snapshot(values),sections=engine.sections(snapshot);
+  const p1=sections.find(section=>section.clauseKey==='p1');
+  p1.body=p1.body.replace('2026','2027');
+  const result=await JSZip.loadAsync(await engine.docx(snapshot,sections));
+  const xml=await result.file('word/document.xml').async('string');
+  const paragraphs=[...xml.matchAll(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>|<w:p\/>/g)].map(match=>match[0]);
+  const text=paragraph=>paragraph.replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'");
+  expect(paragraphs.map(text).filter(body=>body.startsWith('CONTRATO DE PRESTACION'))).toEqual([p1.body]);
+  expect(p1.body).toContain('DICIEMBRE DEL 2027');
+  expect(snapshot.values.AUDITED_YEAR).toBe('2026');
+ });
+ test('UAFE se genera como párrafo DOCX oficial independiente entre p57 y p58',async()=>{
+  const values={};for(const slot of engine.map.slots)values[slot.key]=slot.expected;
+  const snapshot=engine.snapshot(values),sections=prepareNewOfficialContractSections(engine.sections(snapshot));
+  const result=await JSZip.loadAsync(await engine.docx(snapshot,sections));
+  const xml=await result.file('word/document.xml').async('string');
+  const paragraphs=[...xml.matchAll(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g)].map(match=>[...match[0].matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)].map(text=>text[1].replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'")).join(''));
+  const uafeIndex=paragraphs.indexOf(OFFICIAL_UAFE_BODY);
+  expect(sections.find(section=>section.clauseKey===OFFICIAL_UAFE_CLAUSE_KEY).isCustom).toBe(false);
+  expect(uafeIndex).toBeGreaterThan(paragraphs.findIndex(body=>body.startsWith('DECIMA. - CONFIDENCIALIDAD.')));
+  expect(uafeIndex).toBeLessThan(paragraphs.findIndex(body=>body.startsWith('DÉCIMA PRIMERA')));
  });
  test('mantiene representante y auditor en columnas semánticas independientes',async()=>{
   const values={};for(const slot of engine.map.slots)values[slot.key]=slot.expected;

@@ -12,7 +12,7 @@ async function serviceFor(passwordHash) {
 describe('change password', () => {
   test('rejects an incorrect current password', async () => {
     const { service, prisma } = await serviceFor(await argon2.hash(currentPassword));
-    await expect(service.changePassword('user-1', { currentPassword: 'Incorrecta123!', newPassword: validPassword, confirmPassword: validPassword })).rejects.toThrow('La contraseña actual es incorrecta.');
+    await expect(service.changePassword('user-1', { currentPassword: 'Incorrecta123!', newPassword: validPassword, confirmPassword: validPassword })).rejects.toMatchObject({ status: 400, message: 'La contraseña actual es incorrecta.' });
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 

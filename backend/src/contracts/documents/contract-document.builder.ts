@@ -48,20 +48,16 @@ export function buildSafeFileName(contractId: string, format: GeneratedFormat): 
   return `contract-${safeId}-${Date.now()}-${randomBytes(4).toString('hex')}.${format}`;
 }
 
-/**
- * Nombre público del archivo descargado: Contrato_<EMPRESA>_<AÑO>.<ext>.
- * Saneado para que ningún carácter rompa rutas ni cabeceras:
- * sin tildes, solo [a-zA-Z0-9] separados por '_', máximo 100 caracteres.
- */
+/** Nombre público de descarga; la clave de almacenamiento sigue siendo independiente. */
 export function buildPublicFileName(legalName: string, fiscalYear: number | string, format: GeneratedFormat): string {
   const safe =
     (legalName ?? '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-zA-Z0-9]+/g, '_')
-      .replace(/^_|_$/g, '')
-      .slice(0, 100) || 'Empresa';
-  return `Contrato_${safe}_${fiscalYear}.${format}`;
+      .replace(/[\p{Cc}<>:"/\\|?*]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 180)
+      .trim() || 'Empresa';
+  return `Contrato - ${safe} - ${fiscalYear}.${format}`;
 }
 
 function wrapText(text: string, maxChars: number): string[] {

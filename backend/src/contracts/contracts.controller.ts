@@ -9,6 +9,13 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/permissions.decorator';
 import { AuthenticatedUser, CurrentUser } from '../auth/current-user.decorator';
 
+function contentDisposition(disposition:'attachment'|'inline',fileName:string):string {
+  const safe=fileName.replace(/[\p{Cc}"\\]/gu,'_');
+  const ascii=safe.replace(/[^\x20-\x7e]/g,'_');
+  const encoded=encodeURIComponent(safe).replace(/[!'()*]/g,char=>`%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
 @ApiTags('contracts')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller()
@@ -172,7 +179,7 @@ export class ContractsController {
     res.set({
       'Content-Type': file.mimeType,
       'Content-Length': String(file.buffer.length),
-      'Content-Disposition': `attachment; filename="${file.fileName.replace(/["\r\n]/g, '')}"`,
+      'Content-Disposition': contentDisposition('attachment',file.fileName),
     });
     return new StreamableFile(file.buffer);
   }
@@ -191,7 +198,7 @@ export class ContractsController {
     res.set({
       'Content-Type': file.mimeType,
       'Content-Length': String(file.buffer.length),
-      'Content-Disposition': `${download ? 'attachment' : 'inline'}; filename="${file.fileName.replace(/["\r\n]/g, '')}"`,
+      'Content-Disposition': contentDisposition(download?'attachment':'inline',file.fileName),
     });
     return new StreamableFile(file.buffer);
   }
@@ -208,7 +215,7 @@ export class ContractsController {
     res.set({
       'Content-Type': file.mimeType,
       'Content-Length': String(file.size),
-      'Content-Disposition': `attachment; filename="${file.fileName.replace(/["\r\n]/g, '')}"`,
+      'Content-Disposition': contentDisposition('attachment',file.fileName),
     });
     return file.stream;
   }

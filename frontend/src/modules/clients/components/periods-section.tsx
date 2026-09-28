@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../../app/use-auth';
+import { useToast } from '../../../app/use-toast';
 import { getApiErrorMessage, getApiStatus } from '../services/clients.api';
 import {
   auditPeriodsApi,
@@ -19,10 +20,10 @@ import { AuditPeriodForm } from '../../audit-periods/components/audit-period-for
 
 export function PeriodsSection({ clientId }: { clientId: string }) {
   const { hasPermission } = useAuth();
+  const { showToast } = useToast();
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [serverError, setServerError] = useState<string | null>(null);
 
   const query = useQuery({
     queryKey: ['clients', clientId, 'audit-periods'],
@@ -38,12 +39,12 @@ export function PeriodsSection({ clientId }: { clientId: string }) {
     mutationFn: (payload: CreateAuditPeriodPayload) =>
       auditPeriodsApi.createAuditPeriod(clientId, payload),
     onSuccess: () => {
-      setServerError(null);
       setCreating(false);
+      showToast('Período creado correctamente.','success');
       void invalidate();
     },
     onError: (error: unknown) => {
-      setServerError(getApiErrorMessage(error, 'No fue posible crear el período.'));
+      showToast(getApiErrorMessage(error, 'No fue posible crear el período.'),'error');
     },
   });
 
@@ -51,12 +52,12 @@ export function PeriodsSection({ clientId }: { clientId: string }) {
     mutationFn: ({ id, payload }: { id: string; payload: UpdateAuditPeriodPayload }) =>
       auditPeriodsApi.updateAuditPeriod(id, payload),
     onSuccess: () => {
-      setServerError(null);
       setEditingId(null);
+      showToast('Período actualizado correctamente.','success');
       void invalidate();
     },
     onError: (error: unknown) => {
-      setServerError(getApiErrorMessage(error, 'No fue posible actualizar el período.'));
+      showToast(getApiErrorMessage(error, 'No fue posible actualizar el período.'),'error');
     },
   });
 
@@ -93,7 +94,6 @@ export function PeriodsSection({ clientId }: { clientId: string }) {
         {canCreate && !creating && (
           <button
             onClick={() => {
-              setServerError(null);
               setEditingId(null);
               setCreating(true);
             }}
@@ -111,10 +111,9 @@ export function PeriodsSection({ clientId }: { clientId: string }) {
           defaultValues={{ label: '', fiscalYear: '', startDate: '', endDate: '' }}
           submitLabel="Crear período"
           isPending={createMutation.isPending}
-          serverError={serverError}
+          serverError={null}
           onCancel={() => {
             setCreating(false);
-            setServerError(null);
           }}
           onSubmit={(payload) =>
             createMutation.mutate(payload as CreateAuditPeriodPayload)
@@ -158,7 +157,6 @@ export function PeriodsSection({ clientId }: { clientId: string }) {
                           <button
                             className="text-blue-900 underline"
                             onClick={() => {
-                              setServerError(null);
                               setCreating(false);
                               setEditingId(item.id);
                             }}
@@ -201,7 +199,6 @@ export function PeriodsSection({ clientId }: { clientId: string }) {
                     <button
                       className="text-blue-900 underline"
                       onClick={() => {
-                        setServerError(null);
                         setCreating(false);
                         setEditingId(item.id);
                       }}
@@ -224,10 +221,9 @@ export function PeriodsSection({ clientId }: { clientId: string }) {
           defaultValues={auditPeriodToDefaults(editing)}
           submitLabel="Guardar cambios"
           isPending={updateMutation.isPending}
-          serverError={serverError}
+          serverError={null}
           onCancel={() => {
             setEditingId(null);
-            setServerError(null);
           }}
           onSubmit={(payload) =>
             updateMutation.mutate({

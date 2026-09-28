@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../app/use-auth';
+import { useToast } from '../../app/use-toast';
 import { LoginIcon } from './login-icon';
 import packageInfo from '../../../package.json';
 import '../../styles/login.css';
@@ -17,15 +18,15 @@ export function LoginPage() {
  const [email, setEmail] = useState('');
  const [password, setPassword] = useState('');
  const [showPassword, setShowPassword] = useState(false);
- const [error, setError] = useState('');
  const [loading, setLoading] = useState(false);
  const nav = useNavigate();
  const auth = useAuth();
+ const { showToast } = useToast();
  if (auth.isAuthenticated) return <Navigate to="/dashboard" replace />;
  async function submit(event: FormEvent<HTMLFormElement>) {
-  event.preventDefault(); setLoading(true); setError('');
+  event.preventDefault(); setLoading(true);
   try { await auth.login(email, password); nav('/dashboard'); }
-  catch { setError('No fue posible iniciar sesión. Verifique sus credenciales.'); }
+  catch { showToast('No fue posible iniciar sesión. Verifique sus credenciales.','error'); }
   finally { setLoading(false); }
  }
  return <main className="login-page">
@@ -37,7 +38,6 @@ export function LoginPage() {
     <label className="login-field"><span className="login-sr-only">Usuario</span><LoginIcon name="user" /><input type="email" required autoComplete="username" aria-label="Usuario" placeholder="Usuario" value={email} onChange={event => setEmail(event.target.value)} /></label>
     <label className="login-field"><span className="login-sr-only">Contraseña</span><LoginIcon name="lock" /><input id="login-password" type={showPassword ? 'text' : 'password'} required autoComplete="current-password" placeholder="Contraseña" value={password} onChange={event => setPassword(event.target.value)} /><button type="button" className="login-password-toggle" aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} aria-controls="login-password" aria-pressed={showPassword} onClick={() => setShowPassword(!showPassword)}><LoginIcon name={showPassword ? 'eye' : 'eye-off'} /></button></label>
     <label className="login-remember" title="La sesión actual se conserva únicamente mientras la aplicación permanece abierta"><input type="checkbox" name="remember" />Recordar mi sesión</label>
-    {error && <p className="login-error" role="alert">{error}</p>}
     <button className="login-submit" type="submit" disabled={loading}><span>{loading ? 'Ingresando...' : 'Ingresar'}</span><LoginIcon name="arrow" /></button>
    </form>
    <p className="login-access">Acceso exclusivo para usuarios autorizados</p>

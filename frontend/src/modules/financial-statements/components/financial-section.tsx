@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../../app/use-auth';
+import { useToast } from '../../../app/use-toast';
 import { getApiErrorMessage, getApiStatus } from '../../clients/services/clients.api';
 import {
   IMPORT_STATUS_LABELS,
@@ -29,11 +30,10 @@ interface FinancialSectionProps {
 
 export function FinancialSection({ periodId }: FinancialSectionProps) {
   const { hasPermission } = useAuth();
+  const { showToast } = useToast();
   const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [processError, setProcessError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<FinancialStatementType>('FINANCIAL_POSITION');
   const [lineFilter, setLineFilter] = useState<LineFilter>('all');
@@ -41,7 +41,6 @@ export function FinancialSection({ periodId }: FinancialSectionProps) {
     line: FinancialStatementLine;
     type: FinancialStatementType;
   } | null>(null);
-  const [reclassifyError, setReclassifyError] = useState<string | null>(null);
 
   const canRead = hasPermission('financial.read');
   const canImport = hasPermission('financial.import');
@@ -79,12 +78,12 @@ export function FinancialSection({ periodId }: FinancialSectionProps) {
     mutationFn: ({ lineId, key }: { lineId: string; key: string }) =>
       financialStatementsApi.reclassifyLine(lineId, key),
     onSuccess: () => {
-      setReclassifyError(null);
       setReclassify(null);
       refresh(selectedId ?? undefined);
+      showToast('Clasificación guardada correctamente.','success');
     },
     onError: (error: unknown) => {
-      setReclassifyError(getApiErrorMessage(error, 'No fue posible guardar la clasificación.'));
+      showToast(getApiErrorMessage(error, 'No fue posible guardar la clasificación.'),'error');
     },
   });
 
@@ -99,25 +98,24 @@ export function FinancialSection({ periodId }: FinancialSectionProps) {
   const processMutation = useMutation({
     mutationFn: (id: string) => financialStatementsApi.processImport(id),
     onSuccess: (result) => {
-      setProcessError(null);
       setSelectedId(result.id);
       refresh(result.id);
+      showToast('Archivo procesado correctamente.','success');
     },
     onError: (error: unknown) => {
-      setProcessError(getApiErrorMessage(error, 'No fue posible procesar el archivo.'));
+      showToast(getApiErrorMessage(error, 'No fue posible procesar el archivo.'),'error');
     },
   });
 
   const uploadMutation = useMutation({
     mutationFn: (payload: File) => financialStatementsApi.uploadImport(periodId, payload),
     onSuccess: (created) => {
-      setUploadError(null);
       setFile(null);
       refresh(created.id);
       processMutation.mutate(created.id);
     },
     onError: (error: unknown) => {
-      setUploadError(getApiErrorMessage(error, 'No fue posible cargar el archivo.'));
+      showToast(getApiErrorMessage(error, 'No fue posible cargar el archivo.'),'error');
     },
   });
 
@@ -138,7 +136,6 @@ export function FinancialSection({ periodId }: FinancialSectionProps) {
   const busy = uploadMutation.isPending || processMutation.isPending;
 
   const pickFile = (candidate: File | null) => {
-    setUploadError(null);
     setFile(candidate);
   };
 
@@ -204,16 +201,6 @@ export function FinancialSection({ periodId }: FinancialSectionProps) {
             </p>
           )}
 
-          {uploadError && (
-            <p role="alert" className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-              {uploadError}
-            </p>
-          )}
-          {processError && (
-            <p role="alert" className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-              {processError}
-            </p>
-          )}
         </section>
       )}
 
@@ -440,7 +427,6 @@ export function FinancialSection({ periodId }: FinancialSectionProps) {
                                 <td className="border border-slate-200 p-2">
                                   <button
                                     onClick={() => {
-                                      setReclassifyError(null);
                                       setReclassify({ line, type });
                                     }}
                                     className="text-blue-900 underline"
@@ -466,13 +452,12 @@ export function FinancialSection({ periodId }: FinancialSectionProps) {
               compatibleKeys={catalogQuery.data?.[reclassify.type] ?? []}
               catalogLoading={catalogQuery.isLoading}
               isPending={reclassifyMutation.isPending}
-              serverError={reclassifyError}
+              serverError={null}
               onSave={(key) =>
                 reclassifyMutation.mutate({ lineId: reclassify.line.id, key })
               }
               onCancel={() => {
                 setReclassify(null);
-                setReclassifyError(null);
               }}
             />
           )}

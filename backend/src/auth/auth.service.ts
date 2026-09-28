@@ -10,14 +10,31 @@ export class AuthService {
     const user = await this.prisma.user.findFirst({ where: { email, status: 'ACTIVE', deletedAt: null }, include: { organization: true, roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } } } });
     if (!user || !(await argon2.verify(user.passwordHash, password))) throw new UnauthorizedException('Invalid email or password');
     const permissions = user.roles.flatMap((entry) => entry.role.permissions.map((item) => item.permission.key));
-    const accessToken = await this.jwt.signAsync({ sub: user.id, organizationId: user.organizationId, permissions }, { secret: process.env.JWT_ACCESS_SECRET, expiresIn: '15m' });
+    const accessToken = await this.accessToken(user.id, user.organizationId, permissions);
+    const refreshToken = await this.jwt.signAsync({ sub: user.id, organizationId: user.organizationId, tokenUse: 'refresh' }, { secret: process.env.JWT_REFRESH_SECRET, expiresIn: '7d' });
     await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-    return { accessToken, user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, organization: { id: user.organization.id, name: user.organization.name }, permissions } };
+    return { accessToken, refreshToken, user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, organization: { id: user.organization.id, name: user.organization.name }, permissions } };
+  }
+  private accessToken(userId: string, organizationId: string, permissions: string[]) {
+    return this.jwt.signAsync({ sub: userId, organizationId, permissions }, { secret: process.env.JWT_ACCESS_SECRET, expiresIn: '15m' });
+  }
+  async refresh(refreshToken: string) {
+    let payload: { sub: string; organizationId: string; tokenUse?: string };
+    try {
+      payload = await this.jwt.verifyAsync(refreshToken, { secret: process.env.JWT_REFRESH_SECRET });
+    } catch {
+      throw new UnauthorizedException('La sesión renovable no es válida.');
+    }
+    if (payload.tokenUse !== 'refresh' || !payload.sub || !payload.organizationId) throw new UnauthorizedException('La sesión renovable no es válida.');
+    const user = await this.prisma.user.findFirst({ where: { id: payload.sub, organizationId: payload.organizationId, status: 'ACTIVE', deletedAt: null }, include: { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } } } });
+    if (!user) throw new UnauthorizedException('La sesión renovable no es válida.');
+    const permissions = user.roles.flatMap((entry) => entry.role.permissions.map((item) => item.permission.key));
+    return { accessToken: await this.accessToken(user.id, user.organizationId, permissions) };
   }
   async changePassword(userId: string, dto: { currentPassword: string; newPassword: string; confirmPassword: string }) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !(await argon2.verify(user.passwordHash, dto.currentPassword))) {
-      throw new UnauthorizedException('La contraseña actual es incorrecta.');
+      throw new BadRequestException('La contraseña actual es incorrecta.');
     }
     if (dto.newPassword !== dto.confirmPassword) throw new BadRequestException('La confirmación de contraseña no coincide.');
     if (dto.newPassword === dto.currentPassword) throw new BadRequestException('La nueva contraseña debe ser distinta de la actual.');

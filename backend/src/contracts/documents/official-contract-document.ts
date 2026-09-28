@@ -62,6 +62,15 @@ export function patchParagraph(xml:string,next:string,ranges?:{start:number;end:
   xml=xml.slice(0,node.index!)+opening+encode(values[k])+'</w:t>'+xml.slice(node.index!+node[0].length);
  }return xml;
 }
+function officialTitleFormatting(xml:string):string {
+ return xml.replace(/<w:r(?:\s[^>]*)?>[\s\S]*?<\/w:r>/g,run=>{
+  if(!texts(run).length)return run;
+  const properties='<w:b/><w:u w:val="single"/>';
+  if(/<w:rPr(?:\s[^>]*)?>[\s\S]*?<\/w:rPr>/.test(run))return run.replace(/(<w:rPr(?:\s[^>]*)?>)([\s\S]*?)(<\/w:rPr>)/,(_match,open:string,existing:string,close:string)=>`${open}${existing.replace(/<w:b(?:\s[^>]*)?\s*\/>|<w:b(?:\s[^>]*)?>[\s\S]*?<\/w:b>|<w:u(?:\s[^>]*)?\s*\/>|<w:u(?:\s[^>]*)?>[\s\S]*?<\/w:u>/g,'')}${properties}${close}`);
+  if(/<w:rPr\s*\/>/.test(run))return run.replace(/<w:rPr\s*\/>/,'<w:rPr>'+properties+'</w:rPr>');
+  return run.replace(/(<w:r(?:\s[^>]*)?>)/,`$1<w:rPr>${properties}</w:rPr>`);
+ });
+}
 type AuditorFooterSnapshot={professionalTitles:string;fullName:string;position:string;ruc:string;externalAuditorRegistration:string;judicialExpertNumber:string;accountantLicenseNumber:string;address:string;phone:string;email:string};
 const footerTextKey=(value:string)=>value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,'').toLocaleLowerCase('es');
 
@@ -164,7 +173,7 @@ export class OfficialContractDocument {
    return {clauseKey:`p${index}`,title:index<2?'Título del contrato':`Sección ${index}`,body,sortOrder:index};
   }).filter(s=>s.body.trim());
  }
- async docx(snapshot:MasterSnapshot,sections:{clauseKey:string;body:string;title?:string;sortOrder?:number;isCustom?:boolean}[]){
+ async docx(snapshot:MasterSnapshot,sections:{clauseKey:string;body:string;title?:string;sortOrder?:number;isCustom?:boolean;parentClauseKey?:string|null}[]){
   const source=this.masterDocx;
   if(this.masterHash!==snapshot.templateHash||snapshot.templateHash!==this.map.sha256)throw new BadRequestException('La plantilla maestra cambió; no se generó el documento.');
   const zip=await JSZip.loadAsync(source);let xml=await zip.file('word/document.xml')!.async('string');
@@ -192,16 +201,16 @@ const base=sections.filter(section=>!section.isCustom&&/^p\d+$/.test(section.cla
   byKey.set('p63',`${representativePosition}        ${registration}`.trimEnd());
   byKey.set('p64',companyName);
  }
- const additions=new Map<string,typeof sections>();let previous='';
-  for(const section of sections.slice().sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0))){if(!section.isCustom&&/^p\d+$/.test(section.clauseKey))previous=section.clauseKey;else if(section.isCustom&&previous){const items=additions.get(previous)??[];items.push(section);additions.set(previous,items);}}
-  for(let i=paragraphs.length-1;i>=0;i--){const p=paragraphs[i];if(textOf(p[0])!==this.map.paragraphs[i])throw new Error('Texto DOCX inesperado');const body=byKey.get(`p${i}`);if(body===undefined)continue;const ranges=this.map.slots.filter(s=>s.paragraph===i).map(slot=>{const raw=snapshot.values[slot.key]??'';return {start:slot.start,end:slot.end,value:slot.upper?raw.toLocaleUpperCase('es'):raw};}).filter(slot=>this.map.paragraphs[i].slice(slot.start,slot.end)!==slot.value);
+const additions=new Map<string,typeof sections>();let previous='';
+  for(const section of sections.slice().sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0)||a.clauseKey.localeCompare(b.clauseKey))){if(!section.isCustom&&/^p\d+$/.test(section.clauseKey))previous=section.clauseKey;else {const parent=section.parentClauseKey??(section.isCustom?previous:null);if(parent){const items=additions.get(parent)??[];items.push(section);additions.set(parent,items);}}}
+  for(let i=paragraphs.length-1;i>=0;i--){const p=paragraphs[i];if(textOf(p[0])!==this.map.paragraphs[i])throw new Error('Texto DOCX inesperado');const custom=(additions.get(`p${i}`)??[]).map(item=>{
+    const bodyParagraph=patchParagraph(p[0],item.body);
+    return item.title?.trim()?`${patchParagraph(p[0],item.title)}${bodyParagraph}`:bodyParagraph;
+  }).join('');if(i===0){xml=xml.slice(0,p.index!)+custom+xml.slice(p.index!+p[0].length);continue;}const body=byKey.get(`p${i}`);if(body===undefined)continue;const ranges=this.map.slots.filter(s=>s.paragraph===i).map(slot=>{const raw=snapshot.values[slot.key]??'';return {start:slot.start,end:slot.end,value:slot.upper?raw.toLocaleUpperCase('es'):raw};}).filter(slot=>this.map.paragraphs[i].slice(slot.start,slot.end)!==slot.value);
     // Semantic substitutions inherit the first run of their verified slot. Manual
     // changes then preserve unchanged text and its existing run formatting.
     const prepared=ranges.length?patchParagraph(p[0],'',ranges):p[0];
-  const edited=patchParagraph(prepared,body);const custom=(additions.get(`p${i}`)??[]).map(item=>{
-    const bodyParagraph=patchParagraph(p[0],item.body);
-    return item.title?.trim()?`${patchParagraph(p[0],item.title)}${bodyParagraph}`:bodyParagraph;
-  }).join('');xml=xml.slice(0,p.index!)+edited+custom+xml.slice(p.index!+p[0].length);}
+  let edited=patchParagraph(prepared,body);if(i===1)edited=officialTitleFormatting(edited);xml=xml.slice(0,p.index!)+edited+custom+xml.slice(p.index!+p[0].length);}
   xml=signaturesTable(xml,signatureFont,[byKey.get('p62')??this.map.paragraphs[62],byKey.get('p63')??this.map.paragraphs[63],byKey.get('p64')??this.map.paragraphs[64]]);
   const legacyAuditor=(snapshot.values as unknown as {AUDITOR?:AuditorFooterSnapshot}).AUDITOR;
   const auditor=snapshot.AUDITOR??legacyAuditor;

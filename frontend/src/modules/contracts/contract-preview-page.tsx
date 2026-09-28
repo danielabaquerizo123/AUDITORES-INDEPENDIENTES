@@ -114,11 +114,11 @@ export function ContractPreviewPage() {
       )}
 
       <article className="mt-6 rounded-lg border border-slate-200 bg-white p-6 sm:p-8">
-        {sections.map((section) => (
+        {sections.filter((section) => section.clauseKey !== 'p0').map((section) => (
           <section key={section.clauseKey} className="mb-6 last:mb-0">
             <h2 className="text-lg font-semibold">{section.title}</h2>
             {section.body.split(/\n{2,}|\n/).map((paragraph, index) => (
-              <p key={`${section.clauseKey}-${index}`} className="mt-2 text-sm leading-relaxed text-slate-800">
+              <p key={`${section.clauseKey}-${index}`} className={`mt-2 text-sm leading-relaxed text-slate-800 ${section.clauseKey==='p1'?'contract-text-header':'contract-text-body'}`}>
                 {paragraph}
               </p>
             ))}

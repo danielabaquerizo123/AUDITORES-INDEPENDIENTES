@@ -87,22 +87,22 @@ export class CreateContractDto {
 
 export class ContractSectionEditDto {
  @IsString() @Matches(/^p\d+$/) clauseKey!: string;
- @IsString() @MaxLength(8000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
+ @IsString() @MaxLength(50000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
 }
 
 /** Contenido de una única cláusula persistida del contrato. */
 export class UpdateContractClauseDto {
- @IsString() @MaxLength(8000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
+ @IsString() @MaxLength(50000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
 }
 
 export class CreateContractClauseDto {
  @IsString() @IsNotEmpty() @MaxLength(240) title!: string;
- @IsString() @IsNotEmpty() @MaxLength(8000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
+ @IsString() @IsNotEmpty() @MaxLength(50000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
  @IsOptional() @IsString() insertBeforeClauseId?: string;
 }
 
 export class CreateContractParagraphDto {
- @IsString() @IsNotEmpty() @MaxLength(8000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
+ @IsString() @IsNotEmpty() @MaxLength(50000) @Matches(/^[^\p{Cc}]*$/u) body!: string;
 }
 
 export class PrepareOfficialContractDto {

@@ -1,6 +1,7 @@
 import { OfficialContractDocument } from './documents/official-contract-document';
 
 import { PrepareOfficialContractDto, UpdateContractClauseDto, CreateContractClauseDto, CreateContractParagraphDto } from './dto/contracts.dto';
+import { prepareNewOfficialContractSections } from './official-contract-content';
 
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, StreamableFile } from '@nestjs/common';
 
@@ -92,7 +93,7 @@ function toSafeDocument(row: {
 
   createdAt: Date;
 
-}) {
+}, publicFileName?: string) {
 
   return {
 
@@ -108,7 +109,7 @@ function toSafeDocument(row: {
 
     title: row.title,
 
-    originalFileName: row.originalFileName,
+    originalFileName: publicFileName ?? row.originalFileName,
 
     mimeType: row.mimeType,
 
@@ -530,7 +531,7 @@ export class ContractsService {
 
       include: {
 
-        clauses: { orderBy: { sortOrder: 'asc' } },
+        clauses: { orderBy: [{ sortOrder: 'asc' }, { clauseKey: 'asc' }] },
 
         template: true,
 
@@ -860,7 +861,7 @@ export class ContractsService {
 
         storageKey: fileName,
 
-        originalFileName: `contrato-${year}.${format}`,
+        originalFileName: buildPublicFileName(clientName,year,format),
 
         mimeType: MIME_TYPES[format],
 
@@ -914,7 +915,7 @@ export class ContractsService {
 
     });
 
-    return rows.map(toSafeDocument);
+    return rows.map(row=>toSafeDocument(row,buildPublicFileName(item.client.legalName,item.auditPeriod.fiscalYear,row.type===DOCUMENT_TYPES.pdf?'pdf':'docx')));
 
   }
 
@@ -964,7 +965,7 @@ export class ContractsService {
 
       mimeType: record.mimeType ?? 'application/octet-stream',
 
-      fileName: record.originalFileName ?? record.storageKey,
+      fileName: buildPublicFileName(item.client.legalName,item.auditPeriod.fiscalYear,record.type===DOCUMENT_TYPES.pdf?'pdf':'docx'),
 
       size: Number(record.sizeBytes ?? 0),
 
@@ -986,7 +987,7 @@ export class ContractsService {
 
     const snapshot=this.official.snapshot({COMPANY_NAME:client.legalName,COMPANY_RUC:client.taxId,COMPANY_ACTIVITY:client.economicActivity,COMPANY_EMAIL:client.email??'',REPRESENTATIVE_TITLE:rep.treatment,REPRESENTATIVE_NAME:rep.fullName,REPRESENTATIVE_ID:rep.nationalId,REPRESENTATIVE_POSITION:rep.position,AUDITED_YEAR:String(dto.auditedYear)});
 
-    const sections=this.official.sections(snapshot);
+    const sections=prepareNewOfficialContractSections(this.official.sections(snapshot));
 
     try {
 
@@ -994,7 +995,7 @@ export class ContractsService {
 
         const period=await tx.auditPeriod.upsert({where:{clientId_fiscalYear:{clientId:client.id,fiscalYear:dto.auditedYear}},update:{},create:{clientId:client.id,fiscalYear:dto.auditedYear,label:String(dto.auditedYear),startDate:new Date(Date.UTC(dto.auditedYear,0,1)),endDate:new Date(Date.UTC(dto.auditedYear,11,31))}});
 
-        return tx.contract.create({data:{clientId:client.id,auditPeriodId:period.id,createdById:userId,updatedById:userId,variables:JSON.parse(JSON.stringify(snapshot)) as Prisma.InputJsonValue,clauses:{create:sections}},include:{clauses:true,client:true,auditPeriod:true}});
+        return tx.contract.create({data:{clientId:client.id,auditPeriodId:period.id,createdById:userId,updatedById:userId,variables:JSON.parse(JSON.stringify(snapshot)) as Prisma.InputJsonValue,clauses:{create:sections}},include:{clauses:{orderBy:[{sortOrder:'asc'},{clauseKey:'asc'}]},client:true,auditPeriod:true}});
 
       });
 
@@ -1019,7 +1020,7 @@ export class ContractsService {
     const cached=await this.currentGeneratedDocument(item,format,contentHash);
     if(cached) {
       this.logTiming(format,{db,cacheLookup:performance.now()-cacheStarted,total:performance.now()-started,cacheHit:1});
-      return toSafeDocument(cached);
+      return toSafeDocument(cached,buildPublicFileName(item.client.legalName,item.auditPeriod.fiscalYear,format));
     }
 
     const renderStarted=performance.now();
@@ -1032,7 +1033,7 @@ export class ContractsService {
     const record=await this.persistOfficialDocument(org,userId,item,item.variables.templateVersion,format,docx,buffer,contentHash);
     this.logTiming(format,{db,cacheLookup:renderStarted-cacheStarted,renderDocx:conversionStarted-renderStarted,pdfConversion:format==='pdf'?persistStarted-conversionStarted:0,persist:performance.now()-persistStarted,total:performance.now()-started});
 
-    return toSafeDocument(record);
+    return toSafeDocument(record,buildPublicFileName(item.client.legalName,item.auditPeriod.fiscalYear,format));
 
   }
 
@@ -1056,7 +1057,7 @@ export class ContractsService {
     const replacement=new Map<string,string>([
       ['p2',`el auditor externo ${professional}, con RUC No. ${snapshot.ruc} Registro Nacional de Auditor Externo No. ${snapshot.externalAuditorRegistration}`],
       ['p6',`Registro Nacional de Auditor Externo No. ${snapshot.externalAuditorRegistration}`],
-      ['p52',`Por " El Auditor":  Mail: ${snapshot.email}`],
+      ['p55',`Por " El Auditor":  E-mail: ${snapshot.email}`],
       ['p62',`${representativeName}        ${professional}`],
       ['p63',`${representativePosition}        AUDITOR EXTERNO No. ${snapshot.externalAuditorRegistration}`],
       ['p64',companyName],
@@ -1128,6 +1129,7 @@ export class ContractsService {
     const started=performance.now();
     const item=await this.one(org,id);
     const loaded=performance.now();
+    const publicFileName=buildPublicFileName(item.client.legalName,item.auditPeriod.fiscalYear,format);
 
     if(this.official.isOfficial(item.variables)) {
 
@@ -1137,7 +1139,7 @@ export class ContractsService {
         const readStarted=performance.now();const buffer=readFileSync(join(resolveGeneratedDir(),cached.storageKey));
         this.logTiming(format,{db:loaded-started,cacheRead:performance.now()-readStarted,response:performance.now()-started,cacheHit:1});
         await this.audit.record({organizationId:org,actorUserId:userId,action:'CONTRACT_DOCUMENT_DOWNLOADED',entityType:'GeneratedDocument',entityId:cached.id,auditPeriodId:item.auditPeriodId});
-        return {buffer,fileName:cached.originalFileName ?? buildPublicFileName(item.client.legalName,item.auditPeriod.fiscalYear,format),mimeType:MIME_TYPES[format]};
+        return {buffer,fileName:publicFileName,mimeType:MIME_TYPES[format]};
       }
 
       const docx=await this.official.docx(item.variables,item.clauses);
@@ -1158,7 +1160,7 @@ export class ContractsService {
 
           await this.audit.record({organizationId:org,actorUserId:userId,action:'CONTRACT_DOCUMENT_DOWNLOADED',entityType:'GeneratedDocument',entityId:previous.id,auditPeriodId:item.auditPeriodId});
 
-          return {buffer:readFileSync(absolute),fileName:previous.originalFileName ?? buildPublicFileName(item.client.legalName,item.auditPeriod.fiscalYear,format),mimeType:MIME_TYPES[format]};
+          return {buffer:readFileSync(absolute),fileName:publicFileName,mimeType:MIME_TYPES[format]};
 
         }
 
@@ -1166,9 +1168,9 @@ export class ContractsService {
 
       const buffer=format==='docx'?docx:await this.official.pdf(docx);
 
-      const record=await this.persistOfficialDocument(org,userId,item,item.variables.templateVersion,format,docx,buffer,contentHash);
+      await this.persistOfficialDocument(org,userId,item,item.variables.templateVersion,format,docx,buffer,contentHash);
 
-      return {buffer,fileName:record.originalFileName ?? buildPublicFileName(item.client.legalName,item.auditPeriod.fiscalYear,format),mimeType:MIME_TYPES[format]};
+      return {buffer,fileName:publicFileName,mimeType:MIME_TYPES[format]};
 
     }
 
@@ -1186,7 +1188,7 @@ export class ContractsService {
 
     if(!absolute.startsWith(legacyDir)||!existsSync(absolute))throw new NotFoundException('Document file not found');
 
-    return {buffer:readFileSync(absolute),fileName:stored.originalFileName ?? stored.storageKey,mimeType:MIME_TYPES[format]};
+    return {buffer:readFileSync(absolute),fileName:publicFileName,mimeType:MIME_TYPES[format]};
 
   }
 
@@ -1214,7 +1216,7 @@ export class ContractsService {
 
       where: { id, client: { organizationId: org } },
 
-      include: { clauses: { orderBy: { sortOrder: 'asc' } }, client: true, auditPeriod: true, template: true, auditor: true },
+      include: { clauses: { orderBy: [{ sortOrder: 'asc' }, { clauseKey: 'asc' }] }, client: true, auditPeriod: true, template: true, auditor: true },
 
     });
 
